@@ -9,10 +9,9 @@ import {
   BarChart3,
   Server,
   Activity,
-  Terminal,
   Clock
 } from 'lucide-react';
-import { CollectorStatus, InvestigationCase } from '../types';
+import type { CollectorStatus, InvestigationCase } from '../types';
 
 interface SidebarProps {
   currentTab: string;
@@ -33,14 +32,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const isVmOnline = collectorStatus && collectorStatus.connected_collectors_count > 0;
 
+  // Only badges that reflect real state belong here; 'Active' tracks the open case.
   const navItems = [
     { id: 'command-center', label: 'Command Center', icon: Activity, badge: null },
     { id: 'readiness', label: 'Forensic Readiness', icon: Gauge, badge: null },
     { id: 'detection', label: 'Threat & ATT&CK Intel', icon: Crosshair, badge: null },
-    { id: 'prioritization', label: 'Evidence Prioritization', icon: ListOrdered, badge: 'Core' },
+    { id: 'prioritization', label: 'Evidence Prioritization', icon: ListOrdered, badge: null },
     { id: 'investigation', label: 'Incident Investigation', icon: FileSearch, badge: activeCase ? 'Active' : null },
-    { id: 'vault', label: 'Evidence Vault', icon: Vault, badge: 'SHA-256' },
-    { id: 'evaluation', label: 'Research Evaluation', icon: BarChart3, badge: 'Thesis' },
+    { id: 'vault', label: 'Evidence Vault', icon: Vault, badge: null },
+    { id: 'evaluation', label: 'Research Evaluation', icon: BarChart3, badge: null },
   ];
 
   return (
@@ -62,7 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <ShieldAlert size={20} />
           </div>
           <div>
-            <div style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '0.08em', color: '#FFF' }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-primary)' }}>
               THREXIS
             </div>
             <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -85,40 +85,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={item.id}
               onClick={() => setCurrentTab(item.id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '9px 12px',
-                borderRadius: '2px',
-                border: 'none',
-                backgroundColor: isActive ? 'var(--teal-dim)' : 'transparent',
-                color: isActive ? 'var(--teal-glow)' : 'var(--text-secondary)',
-                fontWeight: isActive ? 600 : 400,
-                fontSize: '12.5px',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                textAlign: 'left'
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.backgroundColor = 'var(--bg-surface-hover)';
-                  e.currentTarget.style.color = 'var(--text-primary)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--text-secondary)';
-                }
-              }}
+              className={`nav-item ${isActive ? 'is-active' : ''}`}
+              aria-current={isActive ? 'page' : undefined}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="row-lg">
                 <Icon size={16} />
                 <span>{item.label}</span>
-              </div>
+              </span>
               {item.badge && (
-                <span className={`badge ${isActive ? 'badge-teal' : 'badge-neutral'}`} style={{ fontSize: '9.5px', padding: '1px 5px' }}>
+                <span className={`badge badge-xs ${isActive ? 'badge-teal' : 'badge-neutral'}`}>
                   {item.badge}
                 </span>
               )}
@@ -142,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>Ubuntu VirtualBox:</span>
           </div>
           <span className={`badge ${isVmOnline ? 'badge-teal' : 'badge-neutral'}`}>
-            <span className={`pulse-indicator ${isVmOnline ? '' : 'pulse-red'}`} style={{ width: '6px', height: '6px' }}></span>
+            <span className={`pulse-indicator dot-sm ${isVmOnline ? '' : 'pulse-red'}`}></span>
             {isVmOnline ? 'ONLINE' : 'STANDBY'}
           </span>
         </div>
@@ -150,7 +125,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {activeCase && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px' }}>
             <span style={{ color: 'var(--text-muted)' }}>Investigation:</span>
-            <span className="mono badge badge-amber" style={{ fontSize: '10px' }}>
+            <span className="mono badge badge-amber badge-sm">
               {activeCase.case_id}
             </span>
           </div>

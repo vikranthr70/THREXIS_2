@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { CommandCenter } from './pages/CommandCenter';
@@ -9,6 +9,7 @@ import { IncidentInvestigation } from './pages/IncidentInvestigation';
 import { EvidenceVault } from './pages/EvidenceVault';
 import { ResearchEvaluation } from './pages/ResearchEvaluation';
 import { api } from './services/api';
+import { deriveActiveThreat } from './utils/threatContext';
 import type {
   ReadinessAssessment,
   SecurityEvent,
@@ -31,12 +32,12 @@ export const App: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   const activeCase = cases.length > 0 ? cases[0] : null;
+  const activeThreat = useMemo(() => deriveActiveThreat(alerts, activeCase), [alerts, activeCase]);
 
   const loadData = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const [rData, eData, aData, tData, vData, cStatus, caseList] = await Promise.all([
-        api.getReadiness().catch(() => null),
+      const [eData, aData, tData, vData, cStatus, caseList] = await Promise.all([
         api.getRecentEvents(60).catch(() => []),
         api.getAlerts().catch(() => []),
         api.getMitreTechniques().catch(() => []),
@@ -44,6 +45,12 @@ export const App: React.FC = () => {
         api.getCollectorStatus().catch(() => null),
         api.getCases().catch(() => [])
       ]);
+
+      // Readiness is scored against the technique of the current alert/case so the
+      // backend can apply its threat-specific weight profile (e.g. T1110). It is
+      // fetched after alerts/cases so the context always matches this refresh.
+      const threat = deriveActiveThreat(aData, caseList.length > 0 ? caseList[0] : null);
+      const rData = await api.getReadiness(threat?.techniqueId).catch(() => null);
 
       if (rData) setReadiness(rData);
       setEvents(eData);
@@ -128,6 +135,8 @@ export const App: React.FC = () => {
             readiness={readiness}
             events={events}
             alerts={alerts}
+            techniques={techniques}
+            activeThreat={activeThreat}
             collectorStatus={collectorStatus}
             activeCase={activeCase}
             onNavigate={setCurrentTab}

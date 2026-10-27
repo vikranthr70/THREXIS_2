@@ -34,7 +34,7 @@ export const api = {
 
   // Forensic Readiness
   getReadiness: (threatContext?: string): Promise<ReadinessAssessment> => {
-    const q = threatContext ? `?threat_context=${threatContext}` : '';
+    const q = threatContext ? `?threat_context=${encodeURIComponent(threatContext)}` : '';
     return fetchJson(`${API_BASE}/readiness${q}`);
   },
 

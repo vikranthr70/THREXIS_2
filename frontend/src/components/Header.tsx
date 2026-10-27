@@ -57,7 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
       flexShrink: 0
     }}>
       <div>
-        <h1 style={{ fontSize: '15px', fontWeight: 600, color: '#FFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <h1 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
           {info.title}
         </h1>
         <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>

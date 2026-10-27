@@ -4,133 +4,141 @@ import {
   Activity,
   AlertTriangle,
   ShieldCheck,
-  CheckCircle2,
   Clock,
   ArrowRight,
-  ExternalLink,
   Layers,
   FileText
 } from 'lucide-react';
-import {
+import type {
   ReadinessAssessment,
   SecurityEvent,
   DetectionAlert,
   CollectorStatus,
-  InvestigationCase
+  InvestigationCase,
+  MitreTechnique
 } from '../types';
+import { ReadinessWeightingBadge } from '../components/ReadinessWeightingBadge';
+import {
+  type ActiveThreat,
+  deriveNextAction,
+  findTechnique,
+  severityRank
+} from '../utils/threatContext';
 
 interface CommandCenterProps {
   readiness: ReadinessAssessment | null;
   events: SecurityEvent[];
   alerts: DetectionAlert[];
+  techniques: MitreTechnique[];
+  activeThreat: ActiveThreat | null;
   collectorStatus: CollectorStatus | null;
   activeCase: InvestigationCase | null;
   onNavigate: (tab: string) => void;
 }
 
+const severityBadge = (severity?: string) =>
+  severity === 'HIGH' || severity === 'CRITICAL' ? 'badge-red' : severity === 'MEDIUM' ? 'badge-amber' : 'badge-neutral';
+
+const segmentClass = (factor: number) =>
+  factor >= 0.85 ? 'is-full' : factor >= 0.5 ? 'is-partial' : 'is-empty';
+
 export const CommandCenter: React.FC<CommandCenterProps> = ({
   readiness,
   events,
   alerts,
+  techniques,
+  activeThreat,
   collectorStatus,
   activeCase,
   onNavigate
 }) => {
   const [selectedEvent, setSelectedEvent] = useState<SecurityEvent | null>(null);
 
-  const isVmOnline = collectorStatus && collectorStatus.connected_collectors_count > 0;
+  const collector = collectorStatus?.collectors[0];
+  const isVmOnline = !!collectorStatus && collectorStatus.connected_collectors_count > 0;
   const highSeverityAlerts = alerts.filter(a => a.severity === 'HIGH' || a.severity === 'CRITICAL');
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
   const eventsInLast5Min = events.filter(e => new Date(e.timestamp) >= fiveMinAgo).length;
 
+  const nextAction = activeCase ? deriveNextAction(activeCase) : null;
+  // Same definition as the backend's coverage_percentage (available/collected/validated),
+  // so the "x/n sources" fraction agrees with the percentage next to it.
+  const coveredSources = readiness
+    ? readiness.sources.filter(s => ['available', 'collected', 'validated'].includes(s.status)).length
+    : 0;
+
+  // ---- Threat context, derived from live alerts / the open case ----
+  const technique = activeThreat ? findTechnique(techniques, activeThreat.techniqueId) : undefined;
+  const leadAlert = activeThreat?.alerts[0];
+  const threatEventCount = activeThreat?.alerts.reduce((n, a) => n + (a.event_count || 0), 0) ?? 0;
+  const threatSeverity = activeThreat?.origin === 'alert'
+    ? activeThreat.alerts.reduce((top, a) => (severityRank(a.severity) > severityRank(top) ? a.severity : top), activeThreat.alerts[0].severity as string)
+    : activeCase?.severity;
+  const techniqueName = technique?.name ?? leadAlert?.technique_name ?? 'Unmapped technique';
+  const tactic = technique?.tactics[0] ?? leadAlert?.tactic;
+  const lastObserved = leadAlert?.last_event_at ?? activeCase?.updated_at;
+
   return (
-    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      
+    <div className="page-container page-stack">
+
       {/* Top Row: Readiness Instrument & Operational Telemetry Metrics */}
       <div className="grid-2">
         {/* A. Forensic Readiness Instrument */}
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <Gauge size={16} style={{ color: 'var(--teal-glow)' }} />
+              <Gauge size={16} className="text-teal" />
               Forensic Readiness Instrument
             </span>
-            {readiness && (
-              <span className="badge badge-teal">
-                {readiness.category}
-              </span>
-            )}
+            {readiness && <span className="badge badge-teal">{readiness.category}</span>}
           </div>
 
           {readiness ? (
             <div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', marginBottom: '12px' }}>
-                <span className="mono" style={{ fontSize: '38px', fontWeight: 700, color: 'var(--teal-glow)' }}>
-                  {readiness.score.toFixed(1)}%
-                </span>
-                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
-                  <div>Source Coverage: <b style={{ color: '#FFF' }}>{readiness.coverage_percentage}%</b> ({readiness.sources.length - readiness.gaps_count}/{readiness.sources.length} sources)</div>
-                  <div>Evidence Gaps: <b style={{ color: readiness.gaps_count > 0 ? 'var(--amber-oxide)' : 'var(--teal-glow)' }}>{readiness.gaps_count} sources deficient</b></div>
+              <div className="row wrap" style={{ alignItems: 'baseline', gap: '14px', marginBottom: 'var(--space-3)' }}>
+                <span className="stat-value-xl">{readiness.score.toFixed(1)}%</span>
+                <div className="text-md text-secondary">
+                  <div>
+                    Source Coverage: <b className="text-primary">{readiness.coverage_percentage}%</b>{' '}
+                    ({coveredSources}/{readiness.sources.length} sources)
+                  </div>
+                  <div>
+                    Evidence Gaps:{' '}
+                    <b className={readiness.gaps_count > 0 ? 'text-amber' : 'text-teal'}>
+                      {readiness.gaps_count} sources deficient
+                    </b>
+                  </div>
                 </div>
               </div>
 
-              {/* Segmented Horizontal Readiness Instrument */}
+              {/* Segmented readiness meter: one segment per source, width ∝ weight */}
               <div style={{ marginBottom: '14px' }}>
-                <div style={{
-                  height: '10px',
-                  width: '100%',
-                  backgroundColor: 'var(--border-subtle)',
-                  borderRadius: '5px',
-                  overflow: 'hidden',
-                  display: 'flex',
-                  gap: '2px'
-                }}>
-                  {readiness.sources.map((s, idx) => {
-                    const factorColor = s.factor >= 0.85 ? 'var(--teal-core)' : (s.factor >= 0.5 ? '#EAB308' : '#475569');
-                    return (
-                      <div
-                        key={idx}
-                        title={`${s.source_name}: factor ${s.factor} (weight: ${s.weight})`}
-                        style={{
-                          flex: s.weight,
-                          backgroundColor: factorColor,
-                          transition: 'all 0.3s ease'
-                        }}
-                      />
-                    );
-                  })}
+                <div className="meter">
+                  {readiness.sources.map((s) => (
+                    <div
+                      key={s.source_key}
+                      className={`meter-segment ${segmentClass(s.factor)}`}
+                      title={`${s.source_name}: factor ${s.factor} (weight: ${s.weight})`}
+                      style={{ flex: s.weight }}
+                    />
+                  ))}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                <div className="meter-scale">
                   <span>0% (Blindspot)</span>
                   <span className="mono">Σ(wᵢ × sᵢ) / Σ(wᵢ) = {readiness.weighted_sum.toFixed(2)} / {readiness.total_weight.toFixed(2)}</span>
                   <span>100% (Fully Validated)</span>
                 </div>
               </div>
 
-              <div style={{
-                padding: '9px 12px',
-                backgroundColor: 'var(--bg-surface-elevated)',
-                borderRadius: '4px',
-                fontSize: '11px',
-                color: 'var(--text-secondary)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}>
-                <span>Threat Context: <b style={{ color: 'var(--text-primary)' }}>{readiness.threat_context}</b></span>
-                <button
-                  className="btn btn-secondary"
-                  style={{ fontSize: '11px', padding: '3px 8px' }}
-                  onClick={() => onNavigate('readiness')}
-                >
+              <div className="panel row-between text-sm text-secondary">
+                <ReadinessWeightingBadge readiness={readiness} />
+                <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('readiness')}>
                   Inspect Scoring Engine <ArrowRight size={12} />
                 </button>
               </div>
             </div>
           ) : (
-            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
-              Readiness Not Assessed (Awaiting source status)
-            </div>
+            <div className="empty-state">Readiness Not Assessed (Awaiting source status)</div>
           )}
         </div>
 
@@ -138,41 +146,41 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <Activity size={16} style={{ color: 'var(--teal-glow)' }} />
+              <Activity size={16} className="text-teal" />
               Live Security Telemetry & Collector
             </span>
             <span className={`badge ${isVmOnline ? 'badge-teal' : 'badge-neutral'}`}>
-              <span className={`pulse-indicator ${isVmOnline ? '' : 'pulse-red'}`} style={{ width: '6px', height: '6px' }}></span>
+              <span className={`pulse-indicator dot-sm ${isVmOnline ? '' : 'pulse-red'}`}></span>
               VM {isVmOnline ? 'CONNECTED' : 'WAITING'}
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '14px' }}>
-            <div style={{ padding: '12px', backgroundColor: 'var(--bg-surface-elevated)', borderRadius: '4px' }}>
-              <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Ingested Events</div>
-              <div className="mono" style={{ fontSize: '24px', fontWeight: 700, color: '#FFF' }}>{events.length}</div>
-              <div style={{ fontSize: '10.5px', color: 'var(--teal-glow)' }}>{eventsInLast5Min} received in last 5m</div>
+          <div className="grid-2" style={{ gap: 'var(--space-3)', marginBottom: '14px' }}>
+            <div className="stat">
+              <div className="label">Total Ingested Events</div>
+              <div className="stat-value-lg">{events.length}</div>
+              <div className="text-xs text-teal">{eventsInLast5Min} received in last 5m</div>
             </div>
 
-            <div style={{ padding: '12px', backgroundColor: 'var(--bg-surface-elevated)', borderRadius: '4px' }}>
-              <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Active Detections</div>
-              <div className="mono" style={{ fontSize: '24px', fontWeight: 700, color: alerts.length > 0 ? 'var(--red-oxide-bright)' : '#FFF' }}>
-                {alerts.length}
-              </div>
-              <div style={{ fontSize: '10.5px', color: highSeverityAlerts.length > 0 ? 'var(--red-oxide-bright)' : 'var(--text-muted)' }}>
+            <div className="stat">
+              <div className="label">Active Detections</div>
+              <div className={`stat-value-lg ${alerts.length > 0 ? 'text-red' : ''}`}>{alerts.length}</div>
+              <div className={`text-xs ${highSeverityAlerts.length > 0 ? 'text-red' : 'text-muted'}`}>
                 {highSeverityAlerts.length} high/critical severity
               </div>
             </div>
           </div>
 
-          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div className="stack-sm text-sm text-secondary" style={{ gap: 'var(--space-1)' }}>
+            <div className="kv-row text-sm">
               <span>Collector Host:</span>
-              <span className="mono" style={{ color: '#FFF' }}>
-                {collectorStatus?.collectors[0]?.hostname || 'ubuntu-vbox-lab-01'} ({collectorStatus?.collectors[0]?.ip_address || '192.168.56.101'})
-              </span>
+              {collector ? (
+                <span className="mono text-primary">{collector.hostname} ({collector.ip_address})</span>
+              ) : (
+                <span className="text-muted">No collector registered</span>
+              )}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div className="kv-row text-sm">
               <span>Agent Protocol:</span>
               <span className="mono">HTTP/1.1 Ingestion API (Key Authenticated, SHA-256 Deduplicated)</span>
             </div>
@@ -186,7 +194,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <AlertTriangle size={16} style={{ color: alerts.length > 0 ? 'var(--red-oxide-bright)' : 'var(--teal-glow)' }} />
+              <AlertTriangle size={16} className={alerts.length > 0 ? 'text-red' : 'text-teal'} />
               Active Incident Response Case
             </span>
             {activeCase ? (
@@ -198,96 +206,162 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
 
           {activeCase ? (
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#FFF', marginBottom: '6px' }}>
-                {activeCase.title}
-              </div>
-              <p style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.5 }}>
+              <div className="strong" style={{ fontSize: '13px', marginBottom: '6px' }}>{activeCase.title}</div>
+              <p className="text-md text-secondary prose" style={{ marginBottom: 'var(--space-2)' }}>
                 {activeCase.summary}
               </p>
 
-              <div style={{
-                padding: '10px 12px',
-                backgroundColor: 'var(--bg-surface-elevated)',
-                borderLeft: '3px solid var(--teal-core)',
-                borderRadius: '0 4px 4px 0',
-                marginBottom: '14px'
-              }}>
-                <div style={{ fontSize: '10px', color: 'var(--teal-glow)', fontWeight: 600, textTransform: 'uppercase', marginBottom: '3px' }}>
-                  Next Investigative Action:
-                </div>
-                <div style={{ fontSize: '11.5px', color: '#FFF' }}>
-                  Execute Adaptive Prioritization to preserve SSH auth and session logs within collection budget, then record SHA-256 custody manifest in Evidence Vault.
-                </div>
+              <div className="row-sm wrap" style={{ marginBottom: 'var(--space-3)' }}>
+                <span className="badge badge-teal">{activeCase.status}</span>
+                <span className={`badge ${severityBadge(activeCase.severity)}`}>{activeCase.severity}</span>
+                <span className="badge badge-neutral">{activeCase.supporting_event_ids?.length || 0} events</span>
+                <span className="badge badge-neutral">{activeCase.supporting_alert_ids?.length || 0} alerts</span>
+                <span className="badge badge-neutral">
+                  Readiness at detection {activeCase.readiness_score_at_time.toFixed(1)}%
+                </span>
               </div>
 
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => onNavigate('investigation')}
-                  style={{ fontSize: '11.5px' }}
-                >
+              {nextAction && (
+                <div className="panel panel-accent" style={{ marginBottom: '14px' }}>
+                  <div className="eyebrow" style={{ fontSize: 'var(--fs-2xs)', marginBottom: '3px' }}>
+                    {nextAction.label}
+                  </div>
+                  <div className="text-md text-primary">{nextAction.text}</div>
+                  {nextAction.remainingQuestions > 0 && (
+                    <div className="text-xs text-muted" style={{ marginTop: 'var(--space-1)' }}>
+                      +{nextAction.remainingQuestions} unresolved question{nextAction.remainingQuestions === 1 ? '' : 's'} on this case
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="row-lg">
+                <button className="btn btn-primary" onClick={() => onNavigate('investigation')}>
                   <FileText size={13} />
                   Open Case Investigation
                 </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => onNavigate('prioritization')}
-                  style={{ fontSize: '11.5px' }}
-                >
+                <button className="btn btn-secondary" onClick={() => onNavigate('prioritization')}>
                   Run Evidence Prioritization <ArrowRight size={12} />
                 </button>
               </div>
             </div>
           ) : (
-            <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
-              <ShieldCheck size={32} style={{ margin: '0 auto 8px', color: 'var(--teal-core)' }} />
+            <div className="empty-state">
+              <ShieldCheck size={32} className="empty-state-icon" style={{ color: 'var(--teal-core)' }} />
               <div>Target environment operating within baseline parameters.</div>
-              <div style={{ fontSize: '11px', marginTop: '4px' }}>No active security alerts or brute-force anomalies detected.</div>
+              <div className="empty-state-hint">No active security alerts or brute-force anomalies detected.</div>
             </div>
           )}
         </div>
 
-        {/* MITRE ATT&CK Context Card */}
+        {/* MITRE ATT&CK Context Card — driven by live alerts / the open case */}
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <Layers size={16} style={{ color: 'var(--teal-glow)' }} />
+              <Layers size={16} className="text-teal" />
               Threat Context (MITRE ATT&CK Enterprise)
             </span>
-            <span className="badge badge-teal">T1110 Primary</span>
+            {activeThreat ? (
+              <span className={`badge ${activeThreat.origin === 'alert' ? 'badge-red' : 'badge-amber'}`}>
+                {activeThreat.techniqueId} PRIMARY
+              </span>
+            ) : (
+              <span className="badge badge-neutral">NO ACTIVE TECHNIQUE</span>
+            )}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ padding: '10px 12px', backgroundColor: 'var(--bg-surface-elevated)', borderRadius: '4px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <span className="mono" style={{ color: 'var(--teal-glow)', fontWeight: 600, fontSize: '13px' }}>
-                  T1110: Brute Force
-                </span>
-                <span className="badge badge-neutral">Credential Access</span>
+          {activeThreat ? (
+            <div className="stack">
+              <div className="panel">
+                <div className="row-between" style={{ marginBottom: 'var(--space-1)' }}>
+                  <span className="mono text-teal" style={{ fontWeight: 600, fontSize: '13px' }}>
+                    {activeThreat.techniqueId}: {techniqueName}
+                  </span>
+                  {tactic && <span className="badge badge-neutral">{tactic}</span>}
+                </div>
+                <p className="text-md text-secondary clamp-3" style={{ lineHeight: 1.45 }} title={technique?.description}>
+                  {technique?.description ?? leadAlert?.explanation ?? 'No ATT&CK description available for this technique.'}
+                </p>
               </div>
-              <p style={{ fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                Adversaries attempt repeated access when credentials are unknown. Grounded mapping directly aligns with observed SSH authentication failure sequences.
-              </p>
-            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11.5px', color: 'var(--text-secondary)' }}>
-              <span>Behavioral Confidence:</span>
-              <span className="badge badge-teal">EVIDENTIARY GROUNDED (HIGH)</span>
-            </div>
+              <div className="kv-row">
+                <span>Observed Activity:</span>
+                <span className="mono text-primary">
+                  {activeThreat.origin === 'alert'
+                    ? `${activeThreat.alerts.length} alert${activeThreat.alerts.length === 1 ? '' : 's'} · ${threatEventCount} events`
+                    : `Open case ${activeCase?.case_id ?? ''}`}
+                </span>
+              </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11.5px', color: 'var(--text-secondary)' }}>
-              <span>Crucial Evidence Sources:</span>
-              <span className="mono" style={{ color: '#FFF' }}>SSH auth logs, utmp/btmp sessions</span>
-            </div>
+              {threatSeverity && (
+                <div className="kv-row">
+                  <span>Highest Severity:</span>
+                  <span className={`badge ${severityBadge(threatSeverity)}`}>{threatSeverity}</span>
+                </div>
+              )}
 
-            <button
-              className="btn btn-secondary"
-              onClick={() => onNavigate('detection')}
-              style={{ alignSelf: 'flex-start', marginTop: '4px', fontSize: '11px' }}
-            >
-              Browse Complete ATT&CK Matrix <ArrowRight size={12} />
-            </button>
-          </div>
+              {leadAlert && (leadAlert.source_ip || leadAlert.target_user) && (
+                <div className="kv-row">
+                  <span>Source → Target:</span>
+                  <span className="mono text-primary">
+                    {leadAlert.source_ip || 'unknown'} → {leadAlert.target_user || 'unknown'}@{leadAlert.source_host}
+                  </span>
+                </div>
+              )}
+
+              {lastObserved && (
+                <div className="kv-row">
+                  <span>Last Observed:</span>
+                  <span className="mono">{new Date(lastObserved).toLocaleString()}</span>
+                </div>
+              )}
+
+              {technique && technique.evidence_sources.length > 0 && (
+                <div>
+                  <div className="kv-row" style={{ marginBottom: '6px' }}>
+                    <span>Evidence Sources (per ATT&CK):</span>
+                  </div>
+                  <div className="row-sm wrap">
+                    {technique.evidence_sources.map((src) => (
+                      <span key={src} className="badge badge-teal badge-sm">{src}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeThreat.otherTechniqueIds.length > 0 && (
+                <div className="kv-row">
+                  <span>Also Active:</span>
+                  <span className="row-sm wrap" style={{ justifyContent: 'flex-end' }}>
+                    {activeThreat.otherTechniqueIds.map((id) => (
+                      <span key={id} className="badge badge-neutral mono">{id}</span>
+                    ))}
+                  </span>
+                </div>
+              )}
+
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => onNavigate('detection')}
+                style={{ alignSelf: 'flex-start', marginTop: 'var(--space-1)' }}
+              >
+                Browse Complete ATT&CK Matrix <ArrowRight size={12} />
+              </button>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <ShieldCheck size={32} className="empty-state-icon" style={{ color: 'var(--teal-core)' }} />
+              <div>No active ATT&CK techniques observed.</div>
+              <div className="empty-state-hint">Threat context appears here once a detection rule fires.</div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => onNavigate('detection')}
+                style={{ marginTop: 'var(--space-3)' }}
+              >
+                Browse ATT&CK Matrix <ArrowRight size={12} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -295,14 +369,14 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
       <div className="card">
         <div className="card-header">
           <span className="card-title">
-            <Clock size={16} style={{ color: 'var(--teal-glow)' }} />
+            <Clock size={16} className="text-teal" />
             Live Monitored Telemetry Stream ({events.length} observed events)
           </span>
           <span className="badge badge-neutral">Chronological Order</span>
         </div>
 
         {events.length > 0 ? (
-          <div className="data-table-container" style={{ maxHeight: '280px', overflowY: 'auto' }}>
+          <div className="data-table-container table-scroll">
             <table className="data-table">
               <thead>
                 <tr>
@@ -321,29 +395,23 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                   const isFail = evt.event_type === 'ssh_auth_failure';
                   return (
                     <tr key={evt.event_id}>
-                      <td className="mono" style={{ fontSize: '11px' }}>
+                      <td className="mono cell-small">
                         {new Date(evt.timestamp).toISOString().replace('T', ' ').slice(0, 19)}
                       </td>
-                      <td className="mono" style={{ color: '#FFF' }}>{evt.host}</td>
+                      <td className="mono text-primary">{evt.host}</td>
                       <td><span className="badge badge-neutral">{evt.source}</span></td>
                       <td>
-                        <span className={`badge ${isFail ? 'badge-red' : 'badge-neutral'}`}>
-                          {evt.event_type}
-                        </span>
+                        <span className={`badge ${isFail ? 'badge-red' : 'badge-neutral'}`}>{evt.event_type}</span>
                       </td>
-                      <td className="mono" style={{ color: evt.user === 'root' ? 'var(--red-oxide-bright)' : '#FFF' }}>
+                      <td className={`mono ${evt.user === 'root' ? 'text-red' : 'text-primary'}`}>
                         {evt.user || 'N/A'}
                       </td>
                       <td className="mono">{evt.source_ip || 'N/A'}</td>
-                      <td style={{ maxWidth: '360px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={evt.message}>
+                      <td className="truncate" style={{ maxWidth: '360px' }} title={evt.message}>
                         {evt.message}
                       </td>
                       <td>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ fontSize: '10.5px', padding: '2px 7px' }}
-                          onClick={() => setSelectedEvent(evt)}
-                        >
+                        <button className="btn btn-secondary btn-sm" onClick={() => setSelectedEvent(evt)}>
                           Inspect
                         </button>
                       </td>
@@ -354,7 +422,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             </table>
           </div>
         ) : (
-          <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
+          <div className="empty-state">
             Awaiting live telemetry stream. Start the Ubuntu collector agent (python3 threxis_collector.py) to stream real network events directly to THREXIS.
           </div>
         )}
@@ -362,52 +430,25 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
 
       {/* Inspect Event Modal */}
       {selectedEvent && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.7)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999
-        }}>
-          <div style={{
-            width: '640px',
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-medium)',
-            borderRadius: '6px',
-            padding: '20px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '10px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 600, color: '#FFF' }}>
-                Event Inspection: {selectedEvent.event_id}
-              </span>
+        <div className="modal-backdrop" onClick={() => setSelectedEvent(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Event Inspection: {selectedEvent.event_id}</span>
               <button className="btn btn-secondary" onClick={() => setSelectedEvent(null)}>Close</button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+            <div className="modal-body" style={{ gap: 'var(--space-2)' }}>
               <div><b>Host:</b> {selectedEvent.host}</div>
               <div><b>Timestamp:</b> {selectedEvent.timestamp}</div>
               <div><b>Event Type:</b> <span className="badge badge-amber">{selectedEvent.event_type}</span></div>
               <div><b>Target User:</b> {selectedEvent.user || 'N/A'}</div>
               <div><b>Source IP:</b> {selectedEvent.source_ip || 'N/A'} (Port {selectedEvent.source_port || 'N/A'})</div>
-              <div><b>SHA-256 Provenance Hash:</b> <span className="mono" style={{ fontSize: '10.5px', color: 'var(--teal-glow)' }}>{selectedEvent.sha256}</span></div>
-              <div style={{ marginTop: '8px' }}><b>Raw Log Line:</b></div>
-              <pre style={{
-                backgroundColor: 'var(--bg-core)',
-                padding: '10px',
-                borderRadius: '4px',
-                color: '#CBD5E1',
-                fontSize: '11px',
-                fontFamily: 'var(--font-mono)',
-                overflowX: 'auto',
-                whiteSpace: 'pre-wrap'
-              }}>
-                {selectedEvent.raw_log}
-              </pre>
+              <div>
+                <b>SHA-256 Provenance Hash:</b>{' '}
+                <span className="mono text-teal text-xs">{selectedEvent.sha256}</span>
+              </div>
+              <div style={{ marginTop: 'var(--space-2)' }}><b>Raw Log Line:</b></div>
+              <pre className="code-block text-primary" style={{ padding: '10px' }}>{selectedEvent.raw_log}</pre>
             </div>
           </div>
         </div>

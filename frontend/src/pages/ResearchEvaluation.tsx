@@ -44,7 +44,7 @@ export const ResearchEvaluation: React.FC = () => {
             <div style={{ fontSize: '11px', color: 'var(--teal-glow)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               Academic Thesis Evaluation Framework
             </div>
-            <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#FFF', marginTop: '4px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginTop: '4px' }}>
               Offline Research Evaluation & Empirical Strategy Benchmarking
             </h2>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', maxWidth: '800px', lineHeight: 1.5 }}>
@@ -111,18 +111,18 @@ export const ResearchEvaluation: React.FC = () => {
                   const isAdaptive = row.strategy === 'adaptive';
                   return (
                     <tr key={i} style={{ backgroundColor: isAdaptive ? 'rgba(13, 148, 136, 0.08)' : 'transparent' }}>
-                      <td className="mono" style={{ fontWeight: 600, color: '#FFF' }}>
+                      <td className="mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                         {row.budget_limit} units
                       </td>
                       <td style={{ fontWeight: 600, color: isAdaptive ? 'var(--teal-glow)' : 'var(--text-primary)' }}>
                         {row.strategy.toUpperCase().replace('_', ' ')}
                         {isAdaptive && <span className="badge badge-teal" style={{ marginLeft: '6px', fontSize: '9px' }}>BEST</span>}
                       </td>
-                      <td className="mono" style={{ fontWeight: 700, color: row.avg_recall >= 0.8 ? 'var(--teal-glow)' : (row.avg_recall >= 0.5 ? '#EAB308' : 'var(--red-oxide-bright)') }}>
+                      <td className="mono" style={{ fontWeight: 700, color: row.avg_recall >= 0.8 ? 'var(--teal-glow)' : (row.avg_recall >= 0.5 ? 'var(--amber-bright)' : 'var(--red-oxide-bright)') }}>
                         {(row.avg_recall * 100).toFixed(1)}%
                       </td>
                       <td className="mono">{(row.avg_precision * 100).toFixed(1)}%</td>
-                      <td className="mono" style={{ fontWeight: 600, color: '#FFF' }}>
+                      <td className="mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                         {row.f1_score.toFixed(3)}
                       </td>
                       <td className="mono">{row.avg_cost.toFixed(1)} units</td>
@@ -170,9 +170,9 @@ export const ResearchEvaluation: React.FC = () => {
                   const isFrozen = row.strategy === 'frozen_context';
                   return (
                     <tr key={i} style={{ backgroundColor: isAdaptive ? 'rgba(13, 148, 136, 0.08)' : (isFrozen ? 'rgba(220, 38, 38, 0.08)' : 'transparent') }}>
-                      <td style={{ fontWeight: 500, color: '#FFF' }}>{row.phase}</td>
+                      <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{row.phase}</td>
                       <td className="mono"><span className="badge badge-neutral">{row.threat}</span></td>
-                      <td style={{ fontWeight: 600, color: isAdaptive ? 'var(--teal-glow)' : (isFrozen ? 'var(--red-oxide-bright)' : '#FFF') }}>
+                      <td style={{ fontWeight: 600, color: isAdaptive ? 'var(--teal-glow)' : (isFrozen ? 'var(--red-oxide-bright)' : 'var(--text-primary)') }}>
                         {row.strategy.toUpperCase().replace('_', ' ')}
                       </td>
                       <td className="mono" style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
@@ -189,7 +189,7 @@ export const ResearchEvaluation: React.FC = () => {
             </table>
           </div>
 
-          <div style={{ marginTop: '14px', padding: '12px 14px', backgroundColor: 'var(--bg-core)', borderRadius: '4px', borderLeft: '3px solid var(--teal-core)', fontSize: '11.5px', color: '#E2E8F0', lineHeight: 1.55 }}>
+          <div style={{ marginTop: '14px', padding: '12px 14px', backgroundColor: 'var(--bg-core)', borderRadius: '4px', borderLeft: '3px solid var(--teal-core)', fontSize: '11.5px', color: 'var(--text-primary)', lineHeight: 1.55 }}>
             <b>Academic Analysis: </b>
             When the adversary pivots from SSH password guessing (T1110) to privilege escalation (T1548),
             the <b>Adaptive Strategy</b> instantly reallocates collection budget to acquire privilege escalation and file modification logs, maintaining high recall (100%).
@@ -200,7 +200,7 @@ export const ResearchEvaluation: React.FC = () => {
 
       {/* Research Methodology & Limitations Callout */}
       <div className="card" style={{ backgroundColor: 'var(--bg-surface-elevated)' }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: '#FFF', marginBottom: '6px' }}>
+        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
           Research Assumptions & Scope Limitations
         </div>
         <ul style={{ paddingLeft: '18px', fontSize: '11.5px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px', lineHeight: 1.5 }}>

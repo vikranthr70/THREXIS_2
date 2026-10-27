@@ -1,18 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import {
-  FileSearch,
-  Download,
-  FileText,
-  Clock,
-  ShieldAlert,
-  Save,
-  CheckCircle2,
-  HelpCircle,
-  ExternalLink,
-  Layers,
-  ArrowRight
-} from 'lucide-react';
-import { InvestigationCase, TimelineItem } from '../types';
+import { FileSearch, Download, FileText, Clock, Save, CheckCircle2, HelpCircle } from 'lucide-react';
+import type { InvestigationCase, TimelineItem } from '../types';
 import { api } from '../services/api';
 
 interface IncidentInvestigationProps {
@@ -23,8 +11,7 @@ interface IncidentInvestigationProps {
 
 export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
   activeCase,
-  onRefresh,
-  onNavigateToVault
+  onRefresh
 }) => {
   const [caseDetail, setCaseDetail] = useState<any>(null);
   const [notes, setNotes] = useState<string>('');
@@ -57,10 +44,10 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
 
   if (!activeCase) {
     return (
-      <div className="page-container" style={{ textAlign: 'center', padding: '60px' }}>
-        <FileSearch size={40} style={{ color: 'var(--text-muted)', margin: '0 auto 12px' }} />
-        <div style={{ fontSize: '15px', color: '#FFF' }}>No Incident Cases Opened</div>
-        <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '6px' }}>
+      <div className="page-container page-empty">
+        <FileSearch size={40} className="empty-state-icon text-muted" style={{ marginBottom: 'var(--space-3)' }} />
+        <div className="page-empty-title">No Incident Cases Opened</div>
+        <div className="page-empty-hint">
           When security detections occur, THREXIS automatically opens a threat-informed forensic investigation case.
         </div>
       </div>
@@ -68,36 +55,30 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
   }
 
   const timeline: TimelineItem[] = caseDetail?.timeline || [];
+  const isHighSeverity = activeCase.severity === 'CRITICAL' || activeCase.severity === 'HIGH';
 
   return (
-    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-      
+    <div className="page-container page-stack">
+
       {/* Top Banner: Case Summary & Download Actions */}
-      <div className="card" style={{ borderLeft: '4px solid var(--amber-oxide)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+      <div className="card card-accent-amber">
+        <div className="hero-row">
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span className="mono badge badge-amber" style={{ fontSize: '12px' }}>{activeCase.case_id}</span>
-              <span className={`badge ${activeCase.severity === 'CRITICAL' || activeCase.severity === 'HIGH' ? 'badge-red' : 'badge-neutral'}`}>
-                {activeCase.severity} SEVERITY
-              </span>
+            <div className="row">
+              <span className="mono badge badge-amber" style={{ fontSize: 'var(--fs-base)' }}>{activeCase.case_id}</span>
+              <span className={`badge ${isHighSeverity ? 'badge-red' : 'badge-neutral'}`}>{activeCase.severity} SEVERITY</span>
               <span className="badge badge-teal">{activeCase.status}</span>
             </div>
-            <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#FFF', marginTop: '6px' }}>
-              {activeCase.title}
-            </h2>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', maxWidth: '750px', lineHeight: 1.5 }}>
-              {activeCase.summary}
-            </p>
+            <h2 className="hero-title" style={{ marginTop: '6px' }}>{activeCase.title}</h2>
+            <p className="hero-desc">{activeCase.summary}</p>
           </div>
 
           {/* Export Report Buttons */}
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div className="row-lg">
             <a
               href={api.getReportDownloadUrl(activeCase.case_id, 'pdf')}
               download={`THREXIS_Investigation_Report_${activeCase.case_id}.pdf`}
-              className="btn btn-primary"
-              style={{ textDecoration: 'none', fontSize: '12px', padding: '7px 12px' }}
+              className="btn btn-primary btn-lg"
             >
               <Download size={13} />
               Export Court-Admissible PDF
@@ -105,8 +86,7 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
             <a
               href={api.getReportDownloadUrl(activeCase.case_id, 'json')}
               download={`THREXIS_Investigation_Report_${activeCase.case_id}.json`}
-              className="btn btn-secondary"
-              style={{ textDecoration: 'none', fontSize: '12px', padding: '7px 12px' }}
+              className="btn btn-secondary btn-lg"
             >
               <FileText size={13} />
               Export Structured JSON
@@ -115,19 +95,13 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
         </div>
 
         {/* Case Metadata Details */}
-        <div style={{
-          marginTop: '16px',
-          padding: '10px 14px',
-          backgroundColor: 'var(--bg-core)',
-          borderRadius: '4px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: '11.5px',
-          color: 'var(--text-secondary)'
-        }}>
-          <div><b>Mapped Technique:</b> <span className="mono" style={{ color: 'var(--teal-glow)' }}>{activeCase.primary_technique}</span></div>
+        <div className="panel-inset meta-strip">
+          <div><b>Mapped Technique:</b> <span className="mono text-teal">{activeCase.primary_technique}</span></div>
           <div><b>First Observed:</b> <span className="mono">{new Date(activeCase.created_at).toLocaleString()}</span></div>
-          <div><b>Readiness Score At Detection:</b> <span className="mono" style={{ color: '#FFF', fontWeight: 600 }}>{activeCase.readiness_score_at_time.toFixed(1)}%</span></div>
+          <div>
+            <b>Readiness Score At Detection:</b>{' '}
+            <span className="mono strong">{activeCase.readiness_score_at_time.toFixed(1)}%</span>
+          </div>
           <div><b>Supporting Events:</b> <span className="mono">{activeCase.supporting_event_ids?.length || 0} events</span></div>
         </div>
       </div>
@@ -136,67 +110,43 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
       <div className="card">
         <div className="card-header">
           <span className="card-title">
-            <Clock size={16} style={{ color: 'var(--teal-glow)' }} />
+            <Clock size={16} className="text-teal" />
             Chronological Investigation Timeline ({timeline.length} Correlated Items)
           </span>
           <span className="badge badge-neutral">Event + Alert + Vault Synchronized</span>
         </div>
 
-        <div style={{ position: 'relative', paddingLeft: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Vertical timeline line */}
-          <div style={{
-            position: 'absolute',
-            left: '8px',
-            top: '4px',
-            bottom: '4px',
-            width: '2px',
-            backgroundColor: 'var(--border-medium)'
-          }} />
+        {timeline.length > 0 ? (
+          <div className="timeline">
+            {timeline.map((item) => {
+              const isAlert = item.type === 'DETECTION_ALERT';
+              const isVault = item.type === 'EVIDENCE_ACQUIRED';
+              return (
+                <div key={item.id} className="timeline-item">
+                  <div className={`timeline-dot ${isAlert ? 'is-alert' : isVault ? 'is-vault' : ''}`} />
 
-          {timeline.map((item, idx) => {
-            const isAlert = item.type === 'DETECTION_ALERT';
-            const isVault = item.type === 'EVIDENCE_ACQUIRED';
-            const dotColor = isAlert ? 'var(--red-oxide-bright)' : (isVault ? 'var(--teal-glow)' : '#64748B');
-
-            return (
-              <div key={idx} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {/* Timeline node dot */}
-                <div style={{
-                  position: 'absolute',
-                  left: '-20px',
-                  top: '4px',
-                  width: '10px',
-                  height: '10px',
-                  borderRadius: '50%',
-                  backgroundColor: dotColor,
-                  border: '2px solid var(--bg-surface)'
-                }} />
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    {new Date(item.timestamp).toLocaleTimeString()}
-                  </span>
-                  <span className={`badge ${isAlert ? 'badge-red' : (isVault ? 'badge-teal' : 'badge-neutral')}`} style={{ fontSize: '9.5px' }}>
-                    {item.type}
-                  </span>
-                  <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#FFF' }}>
-                    {item.title}
-                  </span>
-                </div>
-
-                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', paddingLeft: '2px' }}>
-                  {item.description}
-                </div>
-
-                {item.sha256 && (
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    SHA-256 Provenance: {item.sha256}
+                  <div className="row-lg">
+                    <span className="mono text-sm text-muted">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                    <span className={`badge badge-xs ${isAlert ? 'badge-red' : isVault ? 'badge-teal' : 'badge-neutral'}`}>
+                      {item.type}
+                    </span>
+                    <span className="strong" style={{ fontSize: '12.5px' }}>{item.title}</span>
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+
+                  <div className="text-md text-secondary" style={{ paddingLeft: '2px' }}>{item.description}</div>
+
+                  {item.sha256 && (
+                    <div className="mono text-muted" style={{ fontSize: 'var(--fs-2xs)' }}>
+                      SHA-256 Provenance: {item.sha256}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty-state">{caseDetail ? 'No correlated timeline items yet.' : 'Loading case timeline…'}</div>
+        )}
       </div>
 
       {/* Findings & Unresolved Questions */}
@@ -204,15 +154,15 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <CheckCircle2 size={16} style={{ color: 'var(--teal-glow)' }} />
+              <CheckCircle2 size={16} className="text-teal" />
               Forensic Findings
             </span>
             <span className="badge badge-teal">Verified Facts</span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="fact-list">
             {activeCase.findings?.map((f, i) => (
-              <div key={i} style={{ display: 'flex', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                <span style={{ color: 'var(--teal-glow)', fontWeight: 700 }}>•</span>
+              <div key={i} className="fact-item">
+                <span className="fact-marker text-teal">•</span>
                 <span>{f}</span>
               </div>
             ))}
@@ -222,15 +172,15 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <HelpCircle size={16} style={{ color: 'var(--amber-oxide)' }} />
+              <HelpCircle size={16} className="text-amber" />
               Unresolved Investigative Questions
             </span>
             <span className="badge badge-amber">Hypotheses</span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="fact-list">
             {activeCase.unresolved_questions?.map((q, i) => (
-              <div key={i} style={{ display: 'flex', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                <span style={{ color: 'var(--amber-oxide)', fontWeight: 700 }}>?</span>
+              <div key={i} className="fact-item">
+                <span className="fact-marker text-amber">?</span>
                 <span>{q}</span>
               </div>
             ))}
@@ -242,41 +192,28 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
       <div className="card">
         <div className="card-header">
           <span className="card-title">
-            <FileText size={16} style={{ color: 'var(--teal-glow)' }} />
+            <FileText size={16} className="text-teal" />
             Analyst Working Notes & Investigative Assessment
           </span>
-          <button
-            className="btn btn-primary"
-            onClick={handleSaveNotes}
-            disabled={savingNotes}
-            style={{ fontSize: '11px', padding: '4px 10px' }}
-          >
+          <button className="btn btn-primary btn-sm" onClick={handleSaveNotes} disabled={savingNotes}>
             <Save size={12} />
             {savingNotes ? 'Saving...' : 'Save Notes'}
           </button>
         </div>
 
         <textarea
+          className="form-control"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={5}
           placeholder="Document investigator observations, hypothesis testing, witness statements, or lateral movement verification..."
-          style={{
-            width: '100%',
-            backgroundColor: 'var(--bg-core)',
-            border: '1px solid var(--border-medium)',
-            borderRadius: '4px',
-            color: '#F1F5F9',
-            padding: '12px',
-            fontSize: '12px',
-            fontFamily: 'var(--font-sans)',
-            lineHeight: 1.5,
-            resize: 'vertical'
-          }}
         />
+        <div className="text-xs text-muted" style={{ marginTop: 'var(--space-1)' }}>
+          Tip: a line starting with “Recommended Action:” is surfaced as the next investigative action on the Command Center.
+        </div>
 
         {saveSuccess && (
-          <div style={{ marginTop: '8px', fontSize: '11.5px', color: 'var(--teal-glow)' }}>
+          <div className="text-md text-teal" style={{ marginTop: 'var(--space-2)' }}>
             Analyst notes successfully committed to case manifest.
           </div>
         )}
