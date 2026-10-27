@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  FileSearch, Download, FileText, Clock, Save, CheckCircle2, HelpCircle,
-  Vault, ArrowRight, Eye, Lock, RotateCcw, ChevronRight
-} from 'lucide-react';
+import { FileSearch, Download, Save, Vault, Eye, Lock, RotateCcw, ChevronRight } from 'lucide-react';
 import type { InvestigationCase, TimelineItem, EvidenceVaultItem } from '../types';
 import { api } from '../services/api';
 import { parseServerTime } from '../utils/time';
+import { Chip, StatusDot } from '../components/ui';
+import { labelize, severityTone } from '../utils/format';
 
 interface IncidentInvestigationProps {
   cases: InvestigationCase[];
@@ -15,17 +14,12 @@ interface IncidentInvestigationProps {
   onNavigateToVault: () => void;
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  ACTIVE: 'Active',
-  UNDER_REVIEW: 'Under Review',
-  PRESERVED: 'Preserved',
-  CLOSED: 'Closed'
-};
-
 const fmtTime = (ts: string) =>
   parseServerTime(ts).toLocaleString(undefined, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
   });
+
+const caseStatusTone = (status: string) => (status === 'CLOSED' ? 'muted' : status === 'ACTIVE' ? 'warn' : 'neutral');
 
 type TimelineEntry =
   | { kind: 'single'; item: TimelineItem }
@@ -33,8 +27,7 @@ type TimelineEntry =
 
 /**
  * Collapses runs of near-identical security events (same type, user, IP and host)
- * into one entry, so 500 failed logins read as one line instead of 500 rows and
- * the detection alert stays visible.
+ * into one entry, so 500 failed logins read as one line and alerts stay visible.
  */
 function groupTimeline(items: TimelineItem[]): TimelineEntry[] {
   const out: TimelineEntry[] = [];
@@ -85,8 +78,8 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
     savedNotesRef.current = savedNotes;
   }, [notes, savedNotes]);
 
-  // Refetch only when the selected case changes or the case itself was updated. The old
-  // version refetched on every 3-second dashboard poll and overwrote the notes box.
+  // Refetch only when the selected case changes or the case itself was updated,
+  // and never overwrite unsaved notes.
   useEffect(() => {
     if (!caseId) return;
     let cancelled = false;
@@ -99,11 +92,9 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
       const serverNotes: string = data.case.analyst_notes || '';
       const isClean = notesRef.current === savedNotesRef.current;
       if (switchingCase || isClean) {
-        // New case, or no unsaved edits: show what's stored.
         setNotes(serverNotes);
         setSavedNotes(serverNotes);
       }
-      // Otherwise keep the analyst's unsaved text untouched.
       loadedCaseRef.current = caseId;
     }).catch(console.error);
 
@@ -131,7 +122,7 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
     setChangingStatus(true);
     try {
       await api.updateCaseStatus(caseId, status);
-      setSelectedCaseId(caseId); // keep viewing this case even after it stops being "active"
+      setSelectedCaseId(caseId);
       onRefresh();
     } catch (err) {
       console.error(err);
@@ -143,11 +134,9 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
   if (!selectedCase) {
     return (
       <div className="page-container page-empty">
-        <FileSearch size={40} className="empty-state-icon text-muted" style={{ marginBottom: 'var(--space-3)' }} />
-        <div className="page-empty-title">No Incident Cases Opened</div>
-        <div className="page-empty-hint">
-          When security detections occur, THREXIS automatically opens a threat-informed forensic investigation case.
-        </div>
+        <FileSearch size={32} />
+        <div className="page-empty-title">No investigation cases</div>
+        <div className="page-empty-hint">A case opens automatically when a detection rule fires.</div>
       </div>
     );
   }
@@ -155,7 +144,6 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
   const c = selectedCase;
   const timeline: TimelineItem[] = caseDetail?.timeline || [];
   const entries = groupTimeline(timeline);
-  const isHighSeverity = c.severity === 'CRITICAL' || c.severity === 'HIGH';
   const caseEvidence = vaultItems.filter((v) => v.case_id === c.case_id);
   const openCount = cases.filter((x) => x.status !== 'CLOSED').length;
   const isDirty = notes !== savedNotes;
@@ -163,113 +151,120 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
   return (
     <div className="page-container page-stack">
 
-      {/* Case switcher — every case is reachable, not just the latest one */}
-      {cases.length > 1 && (
-        <div className="card row-between wrap" style={{ padding: 'var(--space-3) var(--space-4)' }}>
-          <div className="row wrap">
-            <label className="label" htmlFor="case-select">Case</label>
-            <select
-              id="case-select"
-              className="form-control form-control-sm"
-              style={{ minWidth: '420px' }}
-              value={c.case_id}
-              onChange={(e) => setSelectedCaseId(e.target.value)}
-            >
-              {cases.map((x) => (
-                <option key={x.case_id} value={x.case_id}>
-                  {x.case_id} · {STATUS_LABEL[x.status] ?? x.status} · {x.title}
-                </option>
-              ))}
-            </select>
-          </div>
-          <span className="text-sm text-muted">{cases.length} cases · {openCount} open</span>
-        </div>
-      )}
-
-      {/* Top Banner: Case Summary, Status Actions & Exports */}
-      <div className={`card ${c.status === 'CLOSED' ? 'card-accent' : 'card-accent-amber'}`}>
-        <div className="hero-row">
-          <div>
-            <div className="row">
-              <span className="mono badge badge-amber" style={{ fontSize: 'var(--fs-base)' }}>{c.case_id}</span>
-              <span className={`badge ${isHighSeverity ? 'badge-red' : 'badge-neutral'}`}>{c.severity} SEVERITY</span>
-              <span className={`badge ${c.status === 'CLOSED' ? 'badge-neutral' : 'badge-teal'}`}>
-                {(STATUS_LABEL[c.status] ?? c.status).toUpperCase()}
-              </span>
-            </div>
-            <h2 className="hero-title" style={{ marginTop: '6px' }}>{c.title}</h2>
-            <p className="hero-desc">{c.summary}</p>
-          </div>
-
-          <div className="stack-sm" style={{ alignItems: 'flex-end' }}>
-            <div className="row-sm">
-              {c.status === 'ACTIVE' && (
-                <button className="btn btn-secondary" disabled={changingStatus} onClick={() => handleStatus('UNDER_REVIEW')}>
-                  <Eye size={13} /> Mark Under Review
-                </button>
-              )}
-              {c.status !== 'CLOSED' ? (
-                <button
-                  className="btn btn-secondary"
-                  disabled={changingStatus}
-                  onClick={() => handleStatus('CLOSED')}
-                  title="Closing the case also closes its alerts, so the dashboard returns to baseline threat context."
-                >
-                  <Lock size={13} /> Close Case
-                </button>
-              ) : (
-                <button className="btn btn-secondary" disabled={changingStatus} onClick={() => handleStatus('ACTIVE')}>
-                  <RotateCcw size={13} /> Reopen Case
-                </button>
-              )}
-            </div>
-            <div className="row-sm">
-              <a
-                href={api.getReportDownloadUrl(c.case_id, 'pdf')}
-                download={`THREXIS_Investigation_Report_${c.case_id}.pdf`}
-                className="btn btn-primary"
+      {/* Case header */}
+      <div className="card">
+        <div className="card-header">
+          <div className="row grow">
+            {cases.length > 1 ? (
+              <select
+                className="form-control form-control-sm"
+                aria-label="Select case"
+                style={{ maxWidth: 520 }}
+                value={c.case_id}
+                onChange={(e) => setSelectedCaseId(e.target.value)}
               >
-                <Download size={13} /> Export PDF Report
-              </a>
-              <a
-                href={api.getReportDownloadUrl(c.case_id, 'json')}
-                download={`THREXIS_Investigation_Report_${c.case_id}.json`}
-                className="btn btn-secondary"
+                {cases.map((x) => (
+                  <option key={x.case_id} value={x.case_id}>
+                    {x.case_id} · {labelize(x.status)} · {x.title}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="card-meta">{c.case_id}</span>
+            )}
+            <span className="card-meta">{cases.length} case{cases.length === 1 ? '' : 's'} · {openCount} open</span>
+          </div>
+          <div className="row">
+            {c.status === 'ACTIVE' && (
+              <button className="btn btn-secondary btn-sm" disabled={changingStatus} onClick={() => handleStatus('UNDER_REVIEW')}>
+                <Eye size={12} /> Mark under review
+              </button>
+            )}
+            {c.status !== 'CLOSED' ? (
+              <button
+                className="btn btn-secondary btn-sm"
+                disabled={changingStatus}
+                onClick={() => handleStatus('CLOSED')}
+                title="Also closes the case's alerts, so the dashboard returns to baseline threat context."
               >
-                <FileText size={13} /> Export JSON
-              </a>
-            </div>
+                <Lock size={12} /> Close case
+              </button>
+            ) : (
+              <button className="btn btn-secondary btn-sm" disabled={changingStatus} onClick={() => handleStatus('ACTIVE')}>
+                <RotateCcw size={12} /> Reopen
+              </button>
+            )}
+            <div className="divider-v" />
+            <a href={api.getReportDownloadUrl(c.case_id, 'pdf')} download={`THREXIS_Investigation_Report_${c.case_id}.pdf`} className="btn btn-ghost btn-sm">
+              <Download size={12} /> PDF
+            </a>
+            <a href={api.getReportDownloadUrl(c.case_id, 'json')} download={`THREXIS_Investigation_Report_${c.case_id}.json`} className="btn btn-ghost btn-sm">
+              <Download size={12} /> JSON
+            </a>
           </div>
         </div>
 
-        {/* Case Metadata Details */}
-        <div className="panel-inset meta-strip">
-          <div><b>Primary Technique:</b> <span className="mono text-teal">{c.primary_technique}</span></div>
-          <div><b>Opened:</b> <span className="mono">{fmtTime(c.created_at)}</span></div>
-          <div>
-            <b>Readiness When Opened:</b>{' '}
-            <span className="mono strong">{c.readiness_score_at_time.toFixed(1)}%</span>
+        <div className="card-body stack-lg">
+          <div className="stack">
+            <h2 className="strong" style={{ fontSize: 16 }}>{c.title}</h2>
+            <div className="meta">
+              <StatusDot tone={caseStatusTone(c.status)}>{labelize(c.status)}</StatusDot>
+              <Chip tone={severityTone(c.severity)}>{c.severity}</Chip>
+              <span>Technique <Chip tone="tag">{c.primary_technique}</Chip></span>
+              <span>Opened <span className="mono">{fmtTime(c.created_at)}</span></span>
+              <span><b className="num">{c.supporting_alert_ids?.length || 0}</b> alerts · <b className="num">{c.supporting_event_ids?.length || 0}</b> events</span>
+              <span>Readiness at open <b className="num">{c.readiness_score_at_time.toFixed(1)}%</b></span>
+            </div>
           </div>
-          <div>
-            <b>Supporting:</b>{' '}
-            <span className="mono">
-              {c.supporting_alert_ids?.length || 0} alerts · {c.supporting_event_ids?.length || 0} events
-            </span>
-          </div>
-          <button className="btn btn-secondary btn-sm" onClick={onNavigateToVault}>
-            <Vault size={12} /> {caseEvidence.length} evidence item{caseEvidence.length === 1 ? '' : 's'} in Vault <ArrowRight size={12} />
-          </button>
+          <p className="text-sm text-secondary prose" style={{ maxWidth: 900 }}>{c.summary}</p>
+        </div>
+        <div className="card-footer row-between">
+          <span className="text-sm text-secondary">
+            <span className="num">{caseEvidence.length}</span> evidence item{caseEvidence.length === 1 ? '' : 's'} preserved for this case
+          </span>
+          <button className="btn btn-ghost btn-sm" onClick={onNavigateToVault}><Vault size={12} /> Open Vault</button>
         </div>
       </div>
 
-      {/* Investigation Timeline (repeated events grouped) */}
+      {/* Findings & questions */}
+      <div className="grid-2">
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Findings</span>
+            <span className="card-meta">Computed from alerts and telemetry</span>
+          </div>
+          <div className="list">
+            {c.findings?.map((f, i) => {
+              const isCompromise = f.startsWith('SUCCESSFUL');
+              return (
+                <div key={i} className="list-row text-sm">
+                  {isCompromise
+                    ? <StatusDot tone="crit"><span className="text-crit" style={{ whiteSpace: 'normal' }}>{f}</span></StatusDot>
+                    : <span className="prose">{f}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Open questions</span>
+            <span className="card-meta">For the analyst to answer</span>
+          </div>
+          <div className="list">
+            {c.unresolved_questions?.length ? c.unresolved_questions.map((q, i) => (
+              <div key={i} className="list-row text-sm prose">{q}</div>
+            )) : <div className="list-row text-sm text-muted">None.</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* Timeline */}
       <div className="card">
         <div className="card-header">
-          <span className="card-title">
-            <Clock size={16} className="text-teal" />
-            Investigation Timeline ({timeline.length} items)
-          </span>
-          <span className="text-sm text-muted">Repeated events are grouped · click to expand</span>
+          <span className="card-title">Timeline</span>
+          <span className="card-meta">{timeline.length} items · repeated events grouped</span>
         </div>
 
         {entries.length > 0 ? (
@@ -282,23 +277,22 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
                   <div key={first.id} className="timeline-item">
                     <div className="timeline-dot" />
                     <details className="timeline-group">
-                      <summary className="row-lg wrap">
+                      <summary className="row wrap">
                         <ChevronRight size={13} className="timeline-chevron text-muted" />
-                        <span className="mono text-sm text-muted">{fmtTime(first.timestamp)} – {fmtTime(last.timestamp)}</span>
-                        <span className="badge badge-neutral badge-xs">SECURITY_EVENT ×{entry.items.length}</span>
-                        <span className="strong" style={{ fontSize: '12.5px' }}>
-                          {entry.items.length}× {eventType(first)} for '{first.user || 'unknown'}' from {first.source_ip || 'unknown IP'}
+                        <span className="text-heading medium">
+                          <span className="num">{entry.items.length}</span>× {eventType(first)}
                         </span>
+                        <span className="text-sm text-secondary">
+                          {first.user || 'unknown'} from <span className="mono">{first.source_ip || 'unknown'}</span>
+                        </span>
+                        <span className="mono text-muted">{fmtTime(first.timestamp)} – {fmtTime(last.timestamp)}</span>
                       </summary>
-                      <div className="stack-sm" style={{ marginTop: 'var(--space-2)', paddingLeft: '22px' }}>
+                      <div className="stack" style={{ marginTop: 8, paddingLeft: 21, gap: 6 }}>
                         {entry.items.map((it) => (
-                          <div key={it.id}>
-                            <div className="text-md text-secondary">
-                              <span className="mono text-muted">{fmtTime(it.timestamp)}</span> · {it.description}
-                            </div>
-                            {it.sha256 && (
-                              <div className="mono text-muted" style={{ fontSize: 'var(--fs-2xs)' }}>SHA-256: {it.sha256}</div>
-                            )}
+                          <div key={it.id} className="text-sm">
+                            <span className="mono text-muted">{fmtTime(it.timestamp)}</span>
+                            <span className="text-secondary"> {it.description}</span>
+                            {it.sha256 && <div className="mono text-muted" style={{ fontSize: 11 }}>{it.sha256}</div>}
                           </div>
                         ))}
                       </div>
@@ -312,102 +306,47 @@ export const IncidentInvestigation: React.FC<IncidentInvestigationProps> = ({
               return (
                 <div key={item.id} className="timeline-item">
                   <div className={`timeline-dot ${isAlert ? 'is-alert' : isVault ? 'is-vault' : ''}`} />
-                  <div className="row-lg wrap">
-                    <span className="mono text-sm text-muted">{fmtTime(item.timestamp)}</span>
-                    <span className={`badge badge-xs ${isAlert ? 'badge-red' : isVault ? 'badge-teal' : 'badge-neutral'}`}>
-                      {item.type}
+                  <div className="row wrap">
+                    <span className="text-heading medium">
+                      {item.type === 'SECURITY_EVENT' ? `${eventType(item)} · ${item.user || 'unknown'}` : item.title}
                     </span>
-                    <span className="strong" style={{ fontSize: '12.5px' }}>
-                      {item.type === 'SECURITY_EVENT' ? `${eventType(item)} for '${item.user || 'unknown'}'` : item.title}
-                    </span>
-                    {item.technique && <span className="mono text-sm text-teal">{item.technique}</span>}
+                    {item.technique && <Chip tone="tag">{item.technique.split(' - ')[0]}</Chip>}
+                    {isAlert && item.severity && <Chip tone={severityTone(item.severity)}>{item.severity}</Chip>}
+                    <span className="mono text-muted">{fmtTime(item.timestamp)}</span>
                   </div>
-                  <div className="text-md text-secondary" style={{ paddingLeft: '2px' }}>{item.description}</div>
-                  {item.sha256 && (
-                    <div className="mono text-muted" style={{ fontSize: 'var(--fs-2xs)' }}>SHA-256: {item.sha256}</div>
-                  )}
+                  <div className="text-sm text-secondary">{item.description}</div>
+                  {item.sha256 && <div className="mono text-muted" style={{ fontSize: 11 }}>{item.sha256}</div>}
                 </div>
               );
             })}
           </div>
         ) : (
-          <div className="empty-state">{caseDetail ? 'No correlated timeline items yet.' : 'Loading case timeline…'}</div>
+          <div className="empty-state">{caseDetail ? 'No timeline items yet.' : 'Loading timeline…'}</div>
         )}
       </div>
 
-      {/* Findings & Open Questions */}
-      <div className="grid-2">
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">
-              <CheckCircle2 size={16} className="text-teal" />
-              Forensic Findings
-            </span>
-            <span className="text-sm text-muted">Computed from stored alerts &amp; telemetry</span>
-          </div>
-          <div className="fact-list">
-            {c.findings?.map((f, i) => {
-              const isCompromise = f.startsWith('SUCCESSFUL');
-              return (
-                <div key={i} className={`fact-item ${isCompromise ? 'text-red' : ''}`}>
-                  <span className={`fact-marker ${isCompromise ? 'text-red' : 'text-teal'}`}>{isCompromise ? '!' : '•'}</span>
-                  <span>{f}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">
-              <HelpCircle size={16} className="text-amber" />
-              Open Investigative Questions
-            </span>
-            <span className="text-sm text-muted">Prompts for the analyst, not findings</span>
-          </div>
-          <div className="fact-list">
-            {c.unresolved_questions?.map((q, i) => (
-              <div key={i} className="fact-item">
-                <span className="fact-marker text-amber">?</span>
-                <span>{q}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Analyst Notes Editor */}
+      {/* Notes */}
       <div className="card">
         <div className="card-header">
-          <span className="card-title">
-            <FileText size={16} className="text-teal" />
-            Analyst Working Notes
-          </span>
-          <div className="row-sm">
-            {isDirty && <span className="text-sm text-amber">Unsaved changes</span>}
+          <span className="card-title">Analyst notes</span>
+          <div className="row">
+            {isDirty && <span className="text-sm text-warn">Unsaved changes</span>}
+            {saveSuccess && !isDirty && <span className="text-sm text-secondary">Saved</span>}
             <button className="btn btn-primary btn-sm" onClick={handleSaveNotes} disabled={savingNotes || !isDirty}>
-              <Save size={12} />
-              {savingNotes ? 'Saving...' : 'Save Notes'}
+              <Save size={12} /> {savingNotes ? 'Saving…' : 'Save'}
             </button>
           </div>
         </div>
-
-        <textarea
-          className="form-control"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={5}
-          placeholder="Document observations, hypothesis testing and actions taken. A line starting with “Recommended Action:” is shown as the next action on the Command Center."
-        />
-
-        {saveSuccess && (
-          <div className="text-md text-teal" style={{ marginTop: 'var(--space-2)' }}>
-            Analyst notes saved to the case record.
-          </div>
-        )}
+        <div className="card-body">
+          <textarea
+            className="form-control"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={5}
+            placeholder="Observations, hypotheses and actions taken. A line starting with “Recommended Action:” appears as the next action on the Command Center."
+          />
+        </div>
       </div>
-
     </div>
   );
 };

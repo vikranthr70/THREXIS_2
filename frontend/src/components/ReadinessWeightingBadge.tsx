@@ -1,7 +1,7 @@
 import React from 'react';
-import { Crosshair } from 'lucide-react';
 import type { ReadinessAssessment } from '../types';
 import { describeWeighting } from '../utils/threatContext';
+import { StatusDot } from './ui';
 
 /**
  * Makes the threat-context weighting of the readiness score visible, so a
@@ -12,30 +12,20 @@ export const ReadinessWeightingBadge: React.FC<{ readiness: ReadinessAssessment 
 
   if (weighting.kind === 'adjusted') {
     return (
-      <span
-        className="badge badge-amber"
-        title={`Weights ×${weighting.profile.multiplier} for sources critical to ${weighting.profile.technique} (ATT&CK affinity ≥ ${weighting.profile.affinity_threshold}): ${weighting.profile.boosted_sources.join(', ')}. Without an active threat the score uses baseline weights.`}
+      <StatusDot
+        tone="warn"
+        title={`Weights ×${weighting.profile.multiplier} for sources critical to ${weighting.profile.technique}: ${weighting.profile.boosted_sources.join(', ')}.`}
       >
-        <Crosshair size={11} />
-        THREAT-ADJUSTED · {weighting.techniqueId}
-      </span>
+        Threat-adjusted · {weighting.techniqueId}
+      </StatusDot>
     );
   }
-
   if (weighting.kind === 'context-only') {
     return (
-      <span
-        className="badge badge-neutral"
-        title={`Active technique ${weighting.techniqueId} has no threat-model profile, so baseline weights apply.`}
-      >
-        BASELINE WEIGHTS · {weighting.techniqueId}
-      </span>
+      <StatusDot tone="muted" title={`${weighting.techniqueId} has no threat-model profile; baseline weights apply.`}>
+        Baseline weights · {weighting.techniqueId}
+      </StatusDot>
     );
   }
-
-  return (
-    <span className="badge badge-neutral" title="No active threat technique; baseline source weights apply.">
-      BASELINE WEIGHTS
-    </span>
-  );
+  return <StatusDot tone="muted" title="No active threat technique; baseline weights apply.">Baseline weights</StatusDot>;
 };

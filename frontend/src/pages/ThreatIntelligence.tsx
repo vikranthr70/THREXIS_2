@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Crosshair, ExternalLink, ShieldAlert, FileSearch, Search } from 'lucide-react';
+import { ExternalLink, Search, FileSearch } from 'lucide-react';
 import type { DetectionAlert, MitreTechnique } from '../types';
 import { isOpenStatus } from '../utils/threatContext';
 import { parseServerTime } from '../utils/time';
+import { Chip, StatusDot } from '../components/ui';
+import { labelize, severityTone } from '../utils/format';
 
 interface ThreatIntelligenceProps {
   alerts: DetectionAlert[];
@@ -19,10 +21,8 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
   const [selectedAlert, setSelectedAlert] = useState<DetectionAlert | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Fall back to the first technique once the list has loaded (the list can
-  // arrive after first render, which previously left the detail pane empty).
-  const selectedTechnique =
-    techniques.find(t => t.id === selectedTechniqueId) ?? techniques[0] ?? null;
+  // Fall back to the first technique once the list has loaded.
+  const selectedTechnique = techniques.find(t => t.id === selectedTechniqueId) ?? techniques[0] ?? null;
 
   const openAlerts = alerts.filter(a => isOpenStatus(a.status));
   const q = searchQuery.toLowerCase();
@@ -35,14 +35,11 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
   return (
     <div className="page-container page-stack">
 
-      {/* Live Alerts Section */}
+      {/* Detection alerts */}
       <div className="card">
         <div className="card-header">
-          <span className="card-title">
-            <ShieldAlert size={16} className={openAlerts.length > 0 ? 'text-red' : 'text-teal'} />
-            Threat Detection Alerts ({openAlerts.length} open · {alerts.length - openAlerts.length} closed)
-          </span>
-          <span className="badge badge-neutral">Deterministic Correlation</span>
+          <span className="card-title">Detection alerts</span>
+          <span className="card-meta">{openAlerts.length} open · {alerts.length - openAlerts.length} closed</span>
         </div>
 
         {alerts.length > 0 ? (
@@ -50,71 +47,68 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Alert ID</th>
-                  <th>Detection Rule</th>
+                  <th>Rule</th>
                   <th>Severity</th>
-                  <th>MITRE Technique</th>
+                  <th>Technique</th>
                   <th>Tactic</th>
-                  <th>Target User</th>
+                  <th>Target user</th>
                   <th>Source IP</th>
-                  <th>Event Count</th>
                   <th>Status</th>
-                  <th>Last Observed</th>
-                  <th>Actions</th>
+                  <th className="num">Events</th>
+                  <th className="num">Last seen</th>
+                  <th className="actions"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
-                {alerts.map((alt) => (
-                  <tr key={alt.alert_id} className={isOpenStatus(alt.status) ? '' : 'row-dimmed'}>
-                    <td className="mono cell-id">{alt.alert_id}</td>
-                    <td className="text-primary">{alt.rule_name}</td>
-                    <td>
-                      <span className={`badge ${alt.severity === 'CRITICAL' || alt.severity === 'HIGH' ? 'badge-red' : 'badge-amber'}`}>
-                        {alt.severity}
-                      </span>
-                    </td>
-                    <td className="mono text-teal">{alt.technique_id}</td>
-                    <td><span className="badge badge-neutral">{alt.tactic}</span></td>
-                    <td className="mono">{alt.target_user || 'N/A'}</td>
-                    <td className="mono">{alt.source_ip || 'N/A'}</td>
-                    <td className="mono cell-strong">{alt.event_count} events</td>
-                    <td className="mono cell-small">{alt.status}</td>
-                    <td className="mono cell-small">{parseServerTime(alt.last_event_at).toLocaleTimeString()}</td>
-                    <td>
-                      <div className="row-sm">
-                        <button className="btn btn-secondary btn-sm" onClick={() => setSelectedAlert(alt)}>
-                          Rationale
-                        </button>
-                        <button className="btn btn-primary btn-sm" onClick={onNavigateToInvestigation}>
-                          <FileSearch size={11} /> Investigate
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {alerts.map((alt) => {
+                  const open = isOpenStatus(alt.status);
+                  return (
+                    <tr key={alt.alert_id} className={open ? '' : 'row-dimmed'}>
+                      <td className="cell-primary">
+                        {alt.rule_name}
+                        <div className="text-xs text-muted">{alt.alert_id}</div>
+                      </td>
+                      <td><Chip tone={open ? severityTone(alt.severity) : 'neutral'}>{alt.severity}</Chip></td>
+                      <td><Chip tone="tag">{alt.technique_id}</Chip></td>
+                      <td className="cell-secondary">{alt.tactic}</td>
+                      <td>{alt.target_user || '—'}</td>
+                      <td className="mono">{alt.source_ip || '—'}</td>
+                      <td><StatusDot tone={open ? 'warn' : 'muted'}>{labelize(alt.status)}</StatusDot></td>
+                      <td className="num">{alt.event_count}</td>
+                      <td className="num mono cell-secondary">{parseServerTime(alt.last_event_at).toLocaleTimeString()}</td>
+                      <td className="actions">
+                        <div className="row" style={{ justifyContent: 'flex-end', gap: 4 }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setSelectedAlert(alt)}>Rationale</button>
+                          <button className="btn btn-secondary btn-sm" onClick={onNavigateToInvestigation}>
+                            <FileSearch size={12} /> Investigate
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         ) : (
           <div className="empty-state">
-            No alerts triggered. Threshold has not been reached for SSH authentication failures or unauthorized sudo attempts.
+            <div className="empty-state-title">No alerts</div>
+            <div className="empty-state-hint">No detection threshold has been reached.</div>
           </div>
         )}
       </div>
 
-      {/* MITRE ATT&CK Knowledge Base Explorer */}
+      {/* ATT&CK explorer */}
       <div className="card">
         <div className="card-header">
-          <span className="card-title">
-            <Crosshair size={16} className="text-teal" />
-            MITRE ATT&CK Enterprise Threat Intelligence Matrix
-          </span>
+          <span className="card-title">ATT&CK technique explorer</span>
           <div className="search-field">
             <Search size={13} />
             <input
               type="text"
               className="form-control"
-              placeholder="Search technique or tactic..."
+              placeholder="Filter by ID, name or tactic"
+              aria-label="Filter techniques"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -122,11 +116,10 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
         </div>
 
         <div className="master-detail">
-          {/* Technique list */}
           <div className="select-list">
             {filteredTechniques.map((tech) => {
               const isSelected = selectedTechnique?.id === tech.id;
-              const hasAlert = openAlerts.some(a => a.technique_id.startsWith(tech.id));
+              const detected = openAlerts.some(a => a.technique_id.startsWith(tech.id));
               return (
                 <button
                   key={tech.id}
@@ -134,20 +127,14 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
                   className={`select-item ${isSelected ? 'is-selected' : ''}`}
                   onClick={() => setSelectedTechniqueId(tech.id)}
                 >
-                  <div className="row-between" style={{ marginBottom: '3px' }}>
-                    <span className={`mono text-base ${isSelected ? 'text-teal' : 'text-primary'}`} style={{ fontWeight: 600 }}>
-                      {tech.id}
+                  <div className="row-between">
+                    <span className="row">
+                      <Chip tone="tag">{tech.id}</Chip>
+                      <span className="text-heading medium">{tech.name}</span>
                     </span>
-                    {hasAlert && <span className="badge badge-red badge-xs">ACTIVE DETECT</span>}
+                    {detected && <StatusDot tone="crit">Detected</StatusDot>}
                   </div>
-                  <div className={`text-base ${isSelected ? 'text-primary' : 'text-secondary'}`} style={{ fontWeight: 500 }}>
-                    {tech.name}
-                  </div>
-                  <div className="row wrap" style={{ gap: 'var(--space-1)', marginTop: 'var(--space-1)' }}>
-                    {tech.tactics.map((t) => (
-                      <span key={t} className="badge badge-neutral badge-xs">{t}</span>
-                    ))}
-                  </div>
+                  <div className="text-xs text-muted" style={{ marginTop: 3 }}>{tech.tactics.join(' · ')}</div>
                 </button>
               );
             })}
@@ -156,116 +143,93 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
             )}
           </div>
 
-          {/* Selected Technique Detail View */}
           {selectedTechnique ? (
             <div className="detail-pane">
               <div className="row-between" style={{ alignItems: 'flex-start' }}>
-                <div>
+                <div className="stack" style={{ gap: 4 }}>
                   <div className="row">
-                    <span className="mono badge badge-teal" style={{ fontSize: '13px', padding: '2px 8px' }}>
-                      {selectedTechnique.id}
-                    </span>
-                    <h2 className="strong" style={{ fontSize: '16px', fontWeight: 700 }}>{selectedTechnique.name}</h2>
+                    <Chip tone="tag">{selectedTechnique.id}</Chip>
+                    <h2 className="strong" style={{ fontSize: 15 }}>{selectedTechnique.name}</h2>
                   </div>
-                  <div className="row-sm wrap" style={{ marginTop: '6px' }}>
-                    {selectedTechnique.tactics.map((tac) => (
-                      <span key={tac} className="badge badge-neutral">{tac}</span>
-                    ))}
-                  </div>
+                  <div className="text-sm text-secondary">{selectedTechnique.tactics.join(' · ')}</div>
                 </div>
-
-                <a
-                  href={selectedTechnique.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-secondary btn-sm"
-                >
-                  Official ATT&CK Page <ExternalLink size={12} />
+                <a href={selectedTechnique.url} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">
+                  View on attack.mitre.org <ExternalLink size={12} />
                 </a>
               </div>
 
-              <div>
-                <div className="section-label">Technique Description</div>
-                <p className="text-base text-secondary" style={{ lineHeight: 1.55 }}>{selectedTechnique.description}</p>
-              </div>
+              <section>
+                <div className="section-label">Description</div>
+                <p className="text-sm prose">{selectedTechnique.description}</p>
+              </section>
 
               {selectedTechnique.subtechniques && selectedTechnique.subtechniques.length > 0 && (
-                <div>
-                  <div className="section-label">Grounded Subtechniques</div>
-                  <div className="stack-sm">
+                <section>
+                  <div className="section-label">Sub-techniques</div>
+                  <div className="stack">
                     {selectedTechnique.subtechniques.map((sub) => (
-                      <div key={sub.id} className="sub-item">
-                        <div className="row-sm">
-                          <span className="mono text-teal text-md" style={{ fontWeight: 600 }}>{sub.id}</span>
-                          <span className="text-primary text-base" style={{ fontWeight: 500 }}>{sub.name}</span>
-                        </div>
-                        <div className="text-sm text-muted" style={{ marginTop: '2px' }}>{sub.description}</div>
+                      <div key={sub.id} className="row" style={{ alignItems: 'baseline' }}>
+                        <Chip tone="tag">{sub.id}</Chip>
+                        <span className="text-sm">
+                          <span className="text-heading medium">{sub.name}</span>
+                          <span className="text-secondary"> — {sub.description}</span>
+                        </span>
                       </div>
                     ))}
                   </div>
-                </div>
+                </section>
               )}
 
-              <div>
-                <div className="section-label">Detection Methods</div>
-                <div className="text-md text-secondary prose">{selectedTechnique.detection_methods}</div>
-              </div>
+              <section>
+                <div className="section-label">Detection</div>
+                <p className="text-sm text-secondary prose">{selectedTechnique.detection_methods}</p>
+              </section>
 
-              <div>
-                <div className="section-label">Required Digital Forensic Evidence Sources</div>
-                <div className="row-sm wrap">
-                  {selectedTechnique.evidence_sources.map((src) => (
-                    <span key={src} className="badge badge-teal">{src}</span>
-                  ))}
-                </div>
-              </div>
+              <section>
+                <div className="section-label">Evidence sources</div>
+                <ul className="text-sm" style={{ paddingLeft: 16, display: 'grid', gap: 2 }}>
+                  {selectedTechnique.evidence_sources.map((src) => <li key={src}>{src}</li>)}
+                </ul>
+              </section>
             </div>
           ) : (
-            <div className="empty-state">
-              Select a MITRE technique to inspect details and required forensic sources.
-            </div>
+            <div className="empty-state">Select a technique.</div>
           )}
         </div>
       </div>
 
-      {/* Rationale Modal */}
       {selectedAlert && (
         <div className="modal-backdrop" onClick={() => setSelectedAlert(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title">Mapping Rationale: {selectedAlert.alert_id}</span>
-              <button className="btn btn-secondary" onClick={() => setSelectedAlert(null)}>Close</button>
+              <span className="modal-title">Mapping rationale · {selectedAlert.alert_id}</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => setSelectedAlert(null)}>Close</button>
             </div>
-
             <div className="modal-body">
-              <div><b>Rule:</b> {selectedAlert.rule_name} ({selectedAlert.rule_id})</div>
-              <div>
-                <b>Assigned ATT&CK Technique:</b>{' '}
-                <span className="mono badge badge-teal">{selectedAlert.technique_id} - {selectedAlert.technique_name}</span>
-              </div>
-              <div><b>Tactic:</b> {selectedAlert.tactic}</div>
-              <div><b>Detection Explanation:</b> {selectedAlert.explanation}</div>
-
-              <div className="panel-inset panel-accent" style={{ marginTop: 'var(--space-2)', padding: 'var(--space-3)' }}>
-                <div className="eyebrow" style={{ marginBottom: 'var(--space-1)', letterSpacing: 0 }}>
-                  Transparent Evidentiary Rationale:
+              <dl className="kv">
+                <dt>Rule</dt><dd>{selectedAlert.rule_name} <span className="text-muted">({selectedAlert.rule_id})</span></dd>
+                <dt>Technique</dt><dd className="row"><Chip tone="tag">{selectedAlert.technique_id}</Chip>{selectedAlert.technique_name}</dd>
+                <dt>Tactic</dt><dd>{selectedAlert.tactic}</dd>
+                <dt>Severity</dt><dd><Chip tone={severityTone(selectedAlert.severity)}>{selectedAlert.severity}</Chip></dd>
+              </dl>
+              <section>
+                <div className="section-label">Detection</div>
+                <p className="prose">{selectedAlert.explanation}</p>
+              </section>
+              <section>
+                <div className="section-label">Why this technique</div>
+                <p className="prose text-secondary">{selectedAlert.rationale}</p>
+              </section>
+              <section>
+                <div className="section-label">Supporting events ({selectedAlert.supporting_event_ids.length})</div>
+                <div className="text-xs text-secondary" style={{ wordBreak: 'break-all' }}>
+                  {selectedAlert.supporting_event_ids.join(', ')}
                 </div>
-                <div className="text-primary" style={{ lineHeight: 1.55 }}>{selectedAlert.rationale}</div>
-              </div>
-
-              <div>
-                <b>Supporting Event IDs:</b>
-                <div className="row-sm wrap" style={{ marginTop: 'var(--space-1)' }}>
-                  {selectedAlert.supporting_event_ids.map((id) => (
-                    <span key={id} className="mono badge badge-neutral badge-sm">{id}</span>
-                  ))}
-                </div>
-              </div>
+              </section>
             </div>
           </div>
         </div>
       )}
-
     </div>
   );
 };

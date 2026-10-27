@@ -1,23 +1,15 @@
 import React, { useState } from 'react';
-import {
-  Gauge,
-  Activity,
-  AlertTriangle,
-  ShieldCheck,
-  Clock,
-  ArrowRight,
-  Layers,
-  FileText
-} from 'lucide-react';
+import { ArrowRight, BookOpen } from 'lucide-react';
 import type {
   ReadinessAssessment,
   SecurityEvent,
   DetectionAlert,
-  CollectorStatus,
   InvestigationCase,
   MitreTechnique
 } from '../types';
 import { ReadinessWeightingBadge } from '../components/ReadinessWeightingBadge';
+import { MethodologyDrawer } from '../components/MethodologyDrawer';
+import { Chip, InfoTip, StatusDot } from '../components/ui';
 import {
   type ActiveThreat,
   deriveNextAction,
@@ -25,6 +17,7 @@ import {
   isOpenStatus,
   severityRank
 } from '../utils/threatContext';
+import { labelize, readinessTone, sentenceCase, severityTone } from '../utils/format';
 import { parseServerTime } from '../utils/time';
 
 interface CommandCenterProps {
@@ -33,16 +26,13 @@ interface CommandCenterProps {
   alerts: DetectionAlert[];
   techniques: MitreTechnique[];
   activeThreat: ActiveThreat | null;
-  collectorStatus: CollectorStatus | null;
   activeCase: InvestigationCase | null;
   onNavigate: (tab: string) => void;
 }
 
-const severityBadge = (severity?: string) =>
-  severity === 'HIGH' || severity === 'CRITICAL' ? 'badge-red' : severity === 'MEDIUM' ? 'badge-amber' : 'badge-neutral';
+const segmentClass = (factor: number) => (factor >= 0.85 ? 'is-full' : factor > 0 ? 'is-partial' : 'is-empty');
 
-const segmentClass = (factor: number) =>
-  factor >= 0.85 ? 'is-full' : factor >= 0.5 ? 'is-partial' : 'is-empty';
+const eventTone = (type: string) => (type === 'ssh_auth_failure' ? 'warn' : 'neutral');
 
 export const CommandCenter: React.FC<CommandCenterProps> = ({
   readiness,
@@ -50,25 +40,24 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   alerts,
   techniques,
   activeThreat,
-  collectorStatus,
   activeCase,
   onNavigate
 }) => {
   const [selectedEvent, setSelectedEvent] = useState<SecurityEvent | null>(null);
+  const [methodologyOpen, setMethodologyOpen] = useState(false);
 
-  const collector = collectorStatus?.collectors[0];
-  const isVmOnline = !!collectorStatus && collectorStatus.connected_collectors_count > 0;
   const openAlerts = alerts.filter(a => isOpenStatus(a.status));
   const highSeverityAlerts = openAlerts.filter(a => a.severity === 'HIGH' || a.severity === 'CRITICAL');
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
   const eventsInLast5Min = events.filter(e => parseServerTime(e.timestamp) >= fiveMinAgo).length;
 
-  const nextAction = activeCase ? deriveNextAction(activeCase) : null;
-  // Same definition as the backend's coverage_percentage (available/collected/validated),
-  // so the "x/n sources" fraction agrees with the percentage next to it.
+  // Same definition as the backend's coverage_percentage (available/collected/validated).
   const coveredSources = readiness
     ? readiness.sources.filter(s => ['available', 'collected', 'validated'].includes(s.status)).length
     : 0;
+  const missingSources = readiness ? readiness.sources.filter(s => s.factor === 0).length : 0;
+
+  const nextAction = activeCase ? deriveNextAction(activeCase) : null;
 
   // ---- Threat context, derived from live alerts / the open case ----
   const technique = activeThreat ? findTechnique(techniques, activeThreat.techniqueId) : undefined;
@@ -84,298 +73,193 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   return (
     <div className="page-container page-stack">
 
-      {/* Top Row: Readiness Instrument & Operational Telemetry Metrics */}
-      <div className="grid-2">
-        {/* A. Forensic Readiness Instrument */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">
-              <Gauge size={16} className="text-teal" />
-              Forensic Readiness Instrument
-            </span>
-            {readiness && <span className="badge badge-teal">{readiness.category}</span>}
+      {/* KPI strip */}
+      <div className="grid-4">
+        <div className="card kpi">
+          <div className="kpi-label">
+            Forensic readiness
+            <InfoTip label="How readiness is calculated">
+              Weighted average of evidence sources: 100 × Σ(wᵢ·sᵢ) / Σ(wᵢ), where wᵢ is a source's investigative
+              weight and sᵢ how usable it is. Open Methodology for details.
+            </InfoTip>
           </div>
-
           {readiness ? (
-            <div>
-              <div className="row wrap" style={{ alignItems: 'baseline', gap: '14px', marginBottom: 'var(--space-3)' }}>
-                <span className="stat-value-xl">{readiness.score.toFixed(1)}%</span>
-                <div className="text-md text-secondary">
-                  <div>
-                    Source Coverage: <b className="text-primary">{readiness.coverage_percentage}%</b>{' '}
-                    ({coveredSources}/{readiness.sources.length} sources)
-                  </div>
-                  <div>
-                    Evidence Gaps:{' '}
-                    <b className={readiness.gaps_count > 0 ? 'text-amber' : 'text-teal'}>
-                      {readiness.gaps_count} sources deficient
-                    </b>
-                  </div>
-                </div>
+            <>
+              <div className={`kpi-value ${readinessTone(readiness.score) === 'crit' ? 'text-crit' : readinessTone(readiness.score) === 'warn' ? 'text-warn' : ''}`}>
+                {readiness.score.toFixed(1)}%
               </div>
-
-              {/* Segmented readiness meter: one segment per source, width ∝ weight */}
-              <div style={{ marginBottom: '14px' }}>
-                <div className="meter">
-                  {readiness.sources.map((s) => (
-                    <div
-                      key={s.source_key}
-                      className={`meter-segment ${segmentClass(s.factor)}`}
-                      title={`${s.source_name}: factor ${s.factor} (weight: ${s.weight})`}
-                      style={{ flex: s.weight }}
-                    />
-                  ))}
-                </div>
-                <div className="meter-scale">
-                  <span>0% (Blindspot)</span>
-                  <span className="mono">Σ(wᵢ × sᵢ) / Σ(wᵢ) = {readiness.weighted_sum.toFixed(2)} / {readiness.total_weight.toFixed(2)}</span>
-                  <span>100% (Fully Validated)</span>
-                </div>
+              <div className="kpi-sub">
+                Score {readiness.weighted_sum.toFixed(2)} / {readiness.total_weight.toFixed(2)} · {sentenceCase(readiness.category)}
               </div>
-
-              <div className="panel row-between text-sm text-secondary">
+              <div className="meter" style={{ marginTop: 10 }} aria-label="Readiness by source">
+                {readiness.sources.map((s) => (
+                  <div
+                    key={s.source_key}
+                    className={`meter-seg ${segmentClass(s.factor)}`}
+                    title={`${s.source_name}: ${labelize(s.status)} (weight ${s.weight.toFixed(2)})`}
+                    style={{ flex: s.weight }}
+                  />
+                ))}
+              </div>
+              <div className="row-between" style={{ marginTop: 8 }}>
                 <ReadinessWeightingBadge readiness={readiness} />
-                <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('readiness')}>
-                  Inspect Scoring Engine <ArrowRight size={12} />
+                <button className="btn btn-ghost btn-sm" onClick={() => setMethodologyOpen(true)}>
+                  <BookOpen size={12} /> Methodology
                 </button>
               </div>
-            </div>
+            </>
           ) : (
-            <div className="empty-state">Readiness Not Assessed (Awaiting source status)</div>
+            <div className="kpi-sub">Not assessed yet</div>
           )}
         </div>
 
-        {/* B. Live Security Monitoring Status */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">
-              <Activity size={16} className="text-teal" />
-              Live Security Telemetry & Collector
-            </span>
-            <span className={`badge ${isVmOnline ? 'badge-teal' : 'badge-neutral'}`}>
-              <span className={`pulse-indicator dot-sm ${isVmOnline ? '' : 'pulse-red'}`}></span>
-              VM {isVmOnline ? 'CONNECTED' : 'WAITING'}
-            </span>
+        <div className="card kpi">
+          <div className="kpi-label">Evidence coverage</div>
+          <div className="kpi-value">{readiness ? `${readiness.coverage_percentage}%` : '—'}</div>
+          <div className="kpi-sub">
+            {readiness ? (
+              <>
+                {coveredSources} of {readiness.sources.length} sources available
+                {missingSources > 0 && <> · <span className="text-warn">{missingSources} missing</span></>}
+              </>
+            ) : '—'}
           </div>
+        </div>
 
-          <div className="grid-2" style={{ gap: 'var(--space-3)', marginBottom: '14px' }}>
-            <div className="stat">
-              <div className="label">Total Ingested Events</div>
-              <div className="stat-value-lg">{events.length}</div>
-              <div className="text-xs text-teal">{eventsInLast5Min} received in last 5m</div>
-            </div>
-
-            <div className="stat">
-              <div className="label">Active Detections</div>
-              <div className={`stat-value-lg ${openAlerts.length > 0 ? 'text-red' : ''}`}>{openAlerts.length}</div>
-              <div className={`text-xs ${highSeverityAlerts.length > 0 ? 'text-red' : 'text-muted'}`}>
-                {highSeverityAlerts.length} high/critical severity
-              </div>
-            </div>
+        <div className="card kpi">
+          <div className="kpi-label">Open detections</div>
+          <div className={`kpi-value ${openAlerts.length > 0 ? 'text-crit' : ''}`}>{openAlerts.length}</div>
+          <div className="kpi-sub">
+            {highSeverityAlerts.length > 0
+              ? <span className="text-crit">{highSeverityAlerts.length} high or critical</span>
+              : 'None high or critical'}
           </div>
+        </div>
 
-          <div className="stack-sm text-sm text-secondary" style={{ gap: 'var(--space-1)' }}>
-            <div className="kv-row text-sm">
-              <span>Collector Host:</span>
-              {collector ? (
-                <span className="mono text-primary">{collector.hostname} ({collector.ip_address})</span>
-              ) : (
-                <span className="text-muted">No collector registered</span>
-              )}
-            </div>
-            <div className="kv-row text-sm">
-              <span>Agent Protocol:</span>
-              <span className="mono">HTTP/1.1 Ingestion API (Key Authenticated, SHA-256 Deduplicated)</span>
-            </div>
-          </div>
+        <div className="card kpi">
+          <div className="kpi-label">Events ingested</div>
+          <div className="kpi-value">{events.length}</div>
+          <div className="kpi-sub">{eventsInLast5Min} in the last 5 minutes</div>
         </div>
       </div>
 
-      {/* Middle Row: Active Incident & MITRE ATT&CK Intelligence */}
+      {/* Incident + threat context */}
       <div className="grid-2">
-        {/* Incident Overview Card */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title">
-              <AlertTriangle size={16} className={openAlerts.length > 0 ? 'text-red' : 'text-teal'} />
-              Active Incident Response Case
-            </span>
-            {activeCase ? (
-              <span className="badge badge-amber">{activeCase.case_id}</span>
-            ) : (
-              <span className="badge badge-neutral">NO ACTIVE INCIDENT</span>
-            )}
+            <span className="card-title">Active incident</span>
+            {activeCase && <span className="card-meta">{activeCase.case_id}</span>}
           </div>
 
           {activeCase ? (
-            <div>
-              <div className="strong" style={{ fontSize: '13px', marginBottom: '6px' }}>{activeCase.title}</div>
-              <p className="text-md text-secondary prose" style={{ marginBottom: 'var(--space-2)' }}>
-                {activeCase.summary}
-              </p>
-
-              <div className="row-sm wrap" style={{ marginBottom: 'var(--space-3)' }}>
-                <span className="badge badge-teal">{activeCase.status}</span>
-                <span className={`badge ${severityBadge(activeCase.severity)}`}>{activeCase.severity}</span>
-                <span className="badge badge-neutral">{activeCase.supporting_event_ids?.length || 0} events</span>
-                <span className="badge badge-neutral">{activeCase.supporting_alert_ids?.length || 0} alerts</span>
-                <span className="badge badge-neutral">
-                  Readiness at detection {activeCase.readiness_score_at_time.toFixed(1)}%
-                </span>
-              </div>
-
-              {nextAction && (
-                <div className="panel panel-accent" style={{ marginBottom: '14px' }}>
-                  <div className="eyebrow" style={{ fontSize: 'var(--fs-2xs)', marginBottom: '3px' }}>
-                    {nextAction.label}
+            <>
+              <div className="card-body stack-lg">
+                <div className="stack">
+                  <div className="strong">{activeCase.title}</div>
+                  <div className="meta">
+                    <StatusDot tone={activeCase.status === 'ACTIVE' ? 'warn' : 'neutral'}>{labelize(activeCase.status)}</StatusDot>
+                    <Chip tone={severityTone(activeCase.severity)}>{activeCase.severity}</Chip>
+                    <span><b className="num">{activeCase.supporting_event_ids?.length || 0}</b> events</span>
+                    <span><b className="num">{activeCase.supporting_alert_ids?.length || 0}</b> alerts</span>
+                    <span>Readiness at open <b className="num">{activeCase.readiness_score_at_time.toFixed(1)}%</b></span>
                   </div>
-                  <div className="text-md text-primary">{nextAction.text}</div>
-                  {nextAction.remainingQuestions > 0 && (
-                    <div className="text-xs text-muted" style={{ marginTop: 'var(--space-1)' }}>
-                      +{nextAction.remainingQuestions} unresolved question{nextAction.remainingQuestions === 1 ? '' : 's'} on this case
-                    </div>
-                  )}
                 </div>
-              )}
-
-              <div className="row-lg">
-                <button className="btn btn-primary" onClick={() => onNavigate('investigation')}>
-                  <FileText size={13} />
-                  Open Case Investigation
-                </button>
-                <button className="btn btn-secondary" onClick={() => onNavigate('prioritization')}>
-                  Run Evidence Prioritization <ArrowRight size={12} />
-                </button>
+                <p className="text-sm text-secondary prose">{activeCase.summary}</p>
+                {nextAction && (
+                  <div>
+                    <div className="section-label">
+                      {nextAction.label.startsWith('Recommended') ? 'Next action · analyst notes' : 'Next action · open question'}
+                    </div>
+                    <div className="text-sm text-body">{nextAction.text}</div>
+                    {nextAction.remainingQuestions > 0 && (
+                      <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                        +{nextAction.remainingQuestions} more open question{nextAction.remainingQuestions === 1 ? '' : 's'}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
+              <div className="card-footer row">
+                <button className="btn btn-primary" onClick={() => onNavigate('investigation')}>Open investigation</button>
+                <button className="btn btn-secondary" onClick={() => onNavigate('prioritization')}>Prioritize evidence</button>
+              </div>
+            </>
           ) : (
             <div className="empty-state">
-              <ShieldCheck size={32} className="empty-state-icon" style={{ color: 'var(--teal-core)' }} />
-              <div>Target environment operating within baseline parameters.</div>
-              <div className="empty-state-hint">No active security alerts or brute-force anomalies detected.</div>
+              <div className="empty-state-title">No open incidents</div>
+              <div className="empty-state-hint">Cases open automatically when a detection rule fires.</div>
             </div>
           )}
         </div>
 
-        {/* MITRE ATT&CK Context Card — driven by live alerts / the open case */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title">
-              <Layers size={16} className="text-teal" />
-              Threat Context (MITRE ATT&CK Enterprise)
-            </span>
-            {activeThreat ? (
-              <span className={`badge ${activeThreat.origin === 'alert' ? 'badge-red' : 'badge-amber'}`}>
-                {activeThreat.techniqueId} PRIMARY
-              </span>
-            ) : (
-              <span className="badge badge-neutral">NO ACTIVE TECHNIQUE</span>
-            )}
+            <span className="card-title">Threat context</span>
+            <span className="card-meta">MITRE ATT&CK Enterprise</span>
           </div>
 
           {activeThreat ? (
-            <div className="stack">
-              <div className="panel">
-                <div className="row-between" style={{ marginBottom: 'var(--space-1)' }}>
-                  <span className="mono text-teal" style={{ fontWeight: 600, fontSize: '13px' }}>
-                    {activeThreat.techniqueId}: {techniqueName}
-                  </span>
-                  {tactic && <span className="badge badge-neutral">{tactic}</span>}
-                </div>
-                <p className="text-md text-secondary clamp-3" style={{ lineHeight: 1.45 }} title={technique?.description}>
-                  {technique?.description ?? leadAlert?.explanation ?? 'No ATT&CK description available for this technique.'}
-                </p>
-              </div>
-
-              <div className="kv-row">
-                <span>Observed Activity:</span>
-                <span className="mono text-primary">
-                  {activeThreat.origin === 'alert'
-                    ? `${activeThreat.alerts.length} alert${activeThreat.alerts.length === 1 ? '' : 's'} · ${threatEventCount} events`
-                    : `Open case ${activeCase?.case_id ?? ''}`}
-                </span>
-              </div>
-
-              {threatSeverity && (
-                <div className="kv-row">
-                  <span>Highest Severity:</span>
-                  <span className={`badge ${severityBadge(threatSeverity)}`}>{threatSeverity}</span>
-                </div>
-              )}
-
-              {leadAlert && (leadAlert.source_ip || leadAlert.target_user) && (
-                <div className="kv-row">
-                  <span>Source → Target:</span>
-                  <span className="mono text-primary">
-                    {leadAlert.source_ip || 'unknown'} → {leadAlert.target_user || 'unknown'}@{leadAlert.source_host}
-                  </span>
-                </div>
-              )}
-
-              {lastObserved && (
-                <div className="kv-row">
-                  <span>Last Observed:</span>
-                  <span className="mono">{parseServerTime(lastObserved).toLocaleString()}</span>
-                </div>
-              )}
-
-              {technique && technique.evidence_sources.length > 0 && (
-                <div>
-                  <div className="kv-row" style={{ marginBottom: '6px' }}>
-                    <span>Evidence Sources (per ATT&CK):</span>
+            <>
+              <div className="card-body stack-lg">
+                <div className="stack">
+                  <div className="row wrap">
+                    <Chip tone="tag">{activeThreat.techniqueId}</Chip>
+                    <span className="strong">{techniqueName}</span>
+                    {tactic && <span className="text-sm text-secondary">· {tactic}</span>}
                   </div>
-                  <div className="row-sm wrap">
-                    {technique.evidence_sources.map((src) => (
-                      <span key={src} className="badge badge-teal badge-sm">{src}</span>
-                    ))}
-                  </div>
+                  {technique?.description && (
+                    <p className="text-sm text-secondary prose clamp-2" title={technique.description}>{technique.description}</p>
+                  )}
                 </div>
-              )}
-
-              {activeThreat.otherTechniqueIds.length > 0 && (
-                <div className="kv-row">
-                  <span>Also Active:</span>
-                  <span className="row-sm wrap" style={{ justifyContent: 'flex-end' }}>
-                    {activeThreat.otherTechniqueIds.map((id) => (
-                      <span key={id} className="badge badge-neutral mono">{id}</span>
-                    ))}
-                  </span>
-                </div>
-              )}
-
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => onNavigate('detection')}
-                style={{ alignSelf: 'flex-start', marginTop: 'var(--space-1)' }}
-              >
-                Browse Complete ATT&CK Matrix <ArrowRight size={12} />
-              </button>
-            </div>
+                <dl className="kv">
+                  <dt>Activity</dt>
+                  <dd>
+                    {activeThreat.origin === 'alert'
+                      ? <><span className="num">{activeThreat.alerts.length}</span> alert{activeThreat.alerts.length === 1 ? '' : 's'} · <span className="num">{threatEventCount}</span> events</>
+                      : <>From open case {activeCase?.case_id}</>}
+                  </dd>
+                  {threatSeverity && (<><dt>Severity</dt><dd><Chip tone={severityTone(threatSeverity)}>{threatSeverity}</Chip></dd></>)}
+                  {leadAlert && (leadAlert.source_ip || leadAlert.target_user) && (
+                    <>
+                      <dt>Source → target</dt>
+                      <dd>
+                        <span className="mono">{leadAlert.source_ip || 'unknown'}</span>
+                        {' → '}{leadAlert.target_user || 'unknown'}@{leadAlert.source_host}
+                      </dd>
+                    </>
+                  )}
+                  {lastObserved && (<><dt>Last observed</dt><dd className="mono">{parseServerTime(lastObserved).toLocaleString()}</dd></>)}
+                  {technique && technique.evidence_sources.length > 0 && (
+                    <><dt>Evidence sources</dt><dd className="text-secondary">{technique.evidence_sources.join(', ')}</dd></>
+                  )}
+                  {activeThreat.otherTechniqueIds.length > 0 && (
+                    <>
+                      <dt>Also active</dt>
+                      <dd className="row wrap">{activeThreat.otherTechniqueIds.map((id) => <Chip key={id} tone="tag">{id}</Chip>)}</dd>
+                    </>
+                  )}
+                </dl>
+              </div>
+              <div className="card-footer">
+                <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('detection')}>
+                  Open ATT&CK explorer <ArrowRight size={12} />
+                </button>
+              </div>
+            </>
           ) : (
             <div className="empty-state">
-              <ShieldCheck size={32} className="empty-state-icon" style={{ color: 'var(--teal-core)' }} />
-              <div>No active ATT&CK techniques observed.</div>
-              <div className="empty-state-hint">Threat context appears here once a detection rule fires.</div>
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => onNavigate('detection')}
-                style={{ marginTop: 'var(--space-3)' }}
-              >
-                Browse ATT&CK Matrix <ArrowRight size={12} />
-              </button>
+              <div className="empty-state-title">No active ATT&CK technique</div>
+              <div className="empty-state-hint">Context appears here once a detection rule fires.</div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Bottom Section: Live Activity Telemetry Feed */}
+      {/* Recent telemetry */}
       <div className="card">
         <div className="card-header">
-          <span className="card-title">
-            <Clock size={16} className="text-teal" />
-            Live Monitored Telemetry Stream ({events.length} observed events)
-          </span>
-          <span className="badge badge-neutral">Chronological Order</span>
+          <span className="card-title">Recent telemetry</span>
+          <span className="card-meta">{events.length} events · newest first</span>
         </div>
 
         {events.length > 0 ? (
@@ -383,80 +267,72 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Timestamp (UTC)</th>
+                  <th>Event</th>
                   <th>Host</th>
                   <th>Source</th>
-                  <th>Event Type</th>
                   <th>User</th>
                   <th>Source IP</th>
-                  <th>Raw Message Summary</th>
-                  <th>Action</th>
+                  <th>Message</th>
+                  <th className="num">Time (UTC)</th>
+                  <th className="actions"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
-                {events.slice(0, 15).map((evt) => {
-                  const isFail = evt.event_type === 'ssh_auth_failure';
-                  return (
-                    <tr key={evt.event_id}>
-                      <td className="mono cell-small">
-                        {parseServerTime(evt.timestamp).toISOString().replace('T', ' ').slice(0, 19)}
-                      </td>
-                      <td className="mono text-primary">{evt.host}</td>
-                      <td><span className="badge badge-neutral">{evt.source}</span></td>
-                      <td>
-                        <span className={`badge ${isFail ? 'badge-red' : 'badge-neutral'}`}>{evt.event_type}</span>
-                      </td>
-                      <td className={`mono ${evt.user === 'root' ? 'text-red' : 'text-primary'}`}>
-                        {evt.user || 'N/A'}
-                      </td>
-                      <td className="mono">{evt.source_ip || 'N/A'}</td>
-                      <td className="truncate" style={{ maxWidth: '360px' }} title={evt.message}>
-                        {evt.message}
-                      </td>
-                      <td>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setSelectedEvent(evt)}>
-                          Inspect
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {events.slice(0, 15).map((evt) => (
+                  <tr key={evt.event_id}>
+                    <td><StatusDot tone={eventTone(evt.event_type)}>{evt.event_type}</StatusDot></td>
+                    <td>{evt.host}</td>
+                    <td className="mono cell-secondary">{evt.source}</td>
+                    <td>{evt.user || '—'}</td>
+                    <td className="mono">{evt.source_ip || '—'}</td>
+                    <td className="cell-secondary truncate" style={{ maxWidth: 340 }} title={evt.message}>{evt.message}</td>
+                    <td className="num mono cell-secondary">
+                      {parseServerTime(evt.timestamp).toISOString().replace('T', ' ').slice(0, 19)}
+                    </td>
+                    <td className="actions">
+                      <button className="btn btn-secondary btn-sm" onClick={() => setSelectedEvent(evt)}>Inspect</button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         ) : (
           <div className="empty-state">
-            Awaiting live telemetry stream. Start the Ubuntu collector agent (python3 threxis_collector.py) to stream real network events directly to THREXIS.
+            <div className="empty-state-title">No telemetry yet</div>
+            <div className="empty-state-hint">Start the collector on the Ubuntu VM (python3 threxis_collector.py).</div>
           </div>
         )}
       </div>
 
-      {/* Inspect Event Modal */}
       {selectedEvent && (
         <div className="modal-backdrop" onClick={() => setSelectedEvent(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title">Event Inspection: {selectedEvent.event_id}</span>
-              <button className="btn btn-secondary" onClick={() => setSelectedEvent(null)}>Close</button>
+              <span className="modal-title">Event {selectedEvent.event_id}</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => setSelectedEvent(null)}>Close</button>
             </div>
-
-            <div className="modal-body" style={{ gap: 'var(--space-2)' }}>
-              <div><b>Host:</b> {selectedEvent.host}</div>
-              <div><b>Timestamp:</b> {selectedEvent.timestamp}</div>
-              <div><b>Event Type:</b> <span className="badge badge-amber">{selectedEvent.event_type}</span></div>
-              <div><b>Target User:</b> {selectedEvent.user || 'N/A'}</div>
-              <div><b>Source IP:</b> {selectedEvent.source_ip || 'N/A'} (Port {selectedEvent.source_port || 'N/A'})</div>
+            <div className="modal-body">
+              <dl className="kv">
+                <dt>Type</dt><dd><StatusDot tone={eventTone(selectedEvent.event_type)}>{selectedEvent.event_type}</StatusDot></dd>
+                <dt>Host</dt><dd>{selectedEvent.host}</dd>
+                <dt>Timestamp</dt><dd className="mono">{selectedEvent.timestamp}</dd>
+                <dt>User</dt><dd>{selectedEvent.user || '—'}</dd>
+                <dt>Source</dt><dd><span className="mono">{selectedEvent.source_ip || '—'}</span>{selectedEvent.source_port ? <span className="text-muted"> port {selectedEvent.source_port}</span> : null}</dd>
+                <dt>SHA-256</dt><dd className="mono" style={{ wordBreak: 'break-all' }}>{selectedEvent.sha256}</dd>
+              </dl>
               <div>
-                <b>SHA-256 Provenance Hash:</b>{' '}
-                <span className="mono text-teal text-xs">{selectedEvent.sha256}</span>
+                <div className="section-label">Raw log line</div>
+                <pre className="code-block">{selectedEvent.raw_log}</pre>
               </div>
-              <div style={{ marginTop: 'var(--space-2)' }}><b>Raw Log Line:</b></div>
-              <pre className="code-block text-primary" style={{ padding: '10px' }}>{selectedEvent.raw_log}</pre>
             </div>
           </div>
         </div>
       )}
 
+      {methodologyOpen && readiness && (
+        <MethodologyDrawer readiness={readiness} onClose={() => setMethodologyOpen(false)} />
+      )}
     </div>
   );
 };

@@ -1,96 +1,103 @@
 import React from 'react';
-import { RefreshCw, Radio, Server } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
+import type { CollectorStatus, InvestigationCase } from '../types';
+import { StatusDot } from './ui';
+import { severityTone } from '../utils/format';
+import { parseServerTime } from '../utils/time';
 
 interface HeaderProps {
   currentTab: string;
   onRefresh: () => void;
   isRefreshing: boolean;
+  /** Whether the last dashboard sync reached the backend. */
+  apiReachable: boolean | null;
+  collectorStatus: CollectorStatus | null;
+  activeCase: InvestigationCase | null;
+  totalEventsCount: number;
+  lastEventTime: string | null;
+  onOpenCase: () => void;
 }
 
-const TAB_TITLES: Record<string, { title: string; subtitle: string }> = {
-  'command-center': {
-    title: 'Command Center',
-    subtitle: 'Unified operational monitoring, forensic readiness telemetry, and active incident response'
-  },
-  'readiness': {
-    title: 'Forensic Readiness Engine',
-    subtitle: 'Threat-informed weighted evidence readiness assessment and forensic gap remediation'
-  },
-  'detection': {
-    title: 'Threat Detection & MITRE ATT&CK',
-    subtitle: 'Heuristic rule correlation with deterministic ATT&CK Enterprise behavioral mapping'
-  },
-  'prioritization': {
-    title: 'Adaptive Evidence Prioritization',
-    subtitle: 'Resource-bounded evidence selection algorithms under dynamic threat context shifts'
-  },
-  'investigation': {
-    title: 'Incident Investigation Workspace',
-    subtitle: 'Correlated event chronology, computed findings, case lifecycle and forensic reporting'
-  },
-  'vault': {
-    title: 'Forensic Evidence Vault',
-    subtitle: 'Tamper-evident preservation with SHA-256 cryptographic chain-of-custody verification'
-  }
+const TAB_TITLES: Record<string, string> = {
+  'command-center': 'Command Center',
+  readiness: 'Forensic Readiness',
+  detection: 'Threats & ATT&CK',
+  prioritization: 'Evidence Prioritization',
+  investigation: 'Investigations',
+  vault: 'Evidence Vault'
 };
 
+/**
+ * Single place for environment and telemetry status (backend, collector, active case,
+ * event stream). Previously this was spread across the header, sidebar and cards,
+ * and the listener address was a hardcoded placeholder.
+ */
 export const Header: React.FC<HeaderProps> = ({
   currentTab,
   onRefresh,
-  isRefreshing
+  isRefreshing,
+  apiReachable,
+  collectorStatus,
+  activeCase,
+  totalEventsCount,
+  lastEventTime,
+  onOpenCase
 }) => {
-  const info = TAB_TITLES[currentTab] || { title: 'THREXIS', subtitle: 'Workstation' };
+  const collector = collectorStatus?.collectors[0];
+  const collectorOnline = !!collectorStatus && collectorStatus.connected_collectors_count > 0;
 
   return (
-    <header style={{
-      height: '60px',
-      backgroundColor: 'var(--bg-surface)',
-      borderBottom: '1px solid var(--border-subtle)',
-      padding: '0 24px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      flexShrink: 0
-    }}>
-      <div>
-        <h1 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {info.title}
-        </h1>
-        <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-          {info.subtitle}
-        </p>
-      </div>
+    <header className="topbar">
+      <h1 className="topbar-title">{TAB_TITLES[currentTab] ?? 'THREXIS'}</h1>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-        {/* Real Ingestion Endpoint Status Indicator */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '4px 10px',
-          backgroundColor: 'var(--bg-core)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: '3px',
-          fontSize: '11px'
-        }}>
-          <Server size={13} style={{ color: 'var(--teal-glow)' }} />
-          <span style={{ color: 'var(--text-muted)' }}>Listener:</span>
-          <span className="mono" style={{ color: 'var(--text-primary)', fontWeight: 500 }}>192.168.56.1:8000</span>
-          <span className="badge badge-teal" style={{ padding: '1px 5px', fontSize: '9.5px' }}>
-            <span className="pulse-indicator" style={{ width: '5px', height: '5px' }}></span>
-            ACTIVE
-          </span>
+      <div className="statusbar">
+        <div className="statusbar-item">
+          {apiReachable === null ? (
+            <StatusDot tone="muted">Connecting…</StatusDot>
+          ) : apiReachable ? (
+            <StatusDot tone="ok">Backend</StatusDot>
+          ) : (
+            <StatusDot tone="crit">Backend unreachable</StatusDot>
+          )}
         </div>
 
-        <button
-          className="btn btn-secondary"
-          onClick={onRefresh}
-          disabled={isRefreshing}
-          style={{ fontSize: '11.5px', padding: '5px 10px' }}
-        >
-          <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
-          <span>Sync</span>
-        </button>
+        <div className="statusbar-item">
+          {collector ? (
+            <StatusDot tone={collectorOnline ? 'ok' : 'warn'} title={collector.os_info}>
+              Collector {collector.hostname} <span className="mono text-muted">{collector.ip_address}</span>
+              {!collectorOnline && ' · offline'}
+            </StatusDot>
+          ) : (
+            <StatusDot tone="muted">No collector</StatusDot>
+          )}
+        </div>
+
+        {activeCase && (
+          <div className="statusbar-item">
+            <button className="statusbar-link" onClick={onOpenCase} title={activeCase.title}>
+              <StatusDot tone={severityTone(activeCase.severity)}>{activeCase.case_id}</StatusDot>
+            </button>
+          </div>
+        )}
+
+        <div className="statusbar-item">
+          <span className="num">{totalEventsCount}</span> events
+          {lastEventTime && (
+            <span className="text-muted">· last <span className="mono">{parseServerTime(lastEventTime).toLocaleTimeString()}</span></span>
+          )}
+        </div>
+
+        <div className="statusbar-item" style={{ paddingRight: 0 }}>
+          <button
+            className="btn btn-ghost btn-icon btn-sm"
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            title="Sync now"
+            aria-label="Sync now"
+          >
+            <RefreshCw size={13} />
+          </button>
+        </div>
       </div>
     </header>
   );

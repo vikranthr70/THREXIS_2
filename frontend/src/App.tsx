@@ -29,6 +29,7 @@ export const App: React.FC = () => {
   const [collectorStatus, setCollectorStatus] = useState<CollectorStatus | null>(null);
   const [cases, setCases] = useState<InvestigationCase[]>([]);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [apiReachable, setApiReachable] = useState<boolean | null>(null);
 
   // The active case is the most recently updated case that is still open; a closed
   // case must not keep driving the dashboard's threat context.
@@ -63,6 +64,7 @@ export const App: React.FC = () => {
       const threat = deriveActiveThreat(aData, caseList.find((c) => isOpenStatus(c.status)) ?? null);
       const rData = await api.getReadiness(threat?.techniqueId).catch(() => null);
 
+      setApiReachable(rData !== null);
       if (rData) setReadiness(rData);
       setEvents(eData);
       setAlerts(aData);
@@ -125,20 +127,19 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
-      <Sidebar
-        currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
-        collectorStatus={collectorStatus}
-        activeCase={activeCase}
-        lastEventTime={events.length > 0 ? events[0].timestamp : null}
-        totalEventsCount={events.length}
-      />
+      <Sidebar currentTab={currentTab} setCurrentTab={setCurrentTab} activeCase={activeCase} />
 
       <div className="main-content">
         <Header
           currentTab={currentTab}
           onRefresh={loadData}
           isRefreshing={isRefreshing}
+          apiReachable={apiReachable}
+          collectorStatus={collectorStatus}
+          activeCase={activeCase}
+          totalEventsCount={events.length}
+          lastEventTime={events.length > 0 ? events[0].timestamp : null}
+          onOpenCase={() => setCurrentTab('investigation')}
         />
 
         {currentTab === 'command-center' && (
@@ -148,7 +149,6 @@ export const App: React.FC = () => {
             alerts={alerts}
             techniques={techniques}
             activeThreat={activeThreat}
-            collectorStatus={collectorStatus}
             activeCase={activeCase}
             onNavigate={setCurrentTab}
           />

@@ -1,37 +1,36 @@
 import React, { useState } from 'react';
-import { Gauge, AlertOctagon, TrendingUp } from 'lucide-react';
+import { Gauge, BookOpen } from 'lucide-react';
 import type { ReadinessAssessment } from '../types';
 import { api } from '../services/api';
 import { ReadinessWeightingBadge } from '../components/ReadinessWeightingBadge';
+import { MethodologyDrawer } from '../components/MethodologyDrawer';
+import { InfoTip, StatusDot } from '../components/ui';
+import { labelize, readinessTone, sentenceCase, sourceStatusTone } from '../utils/format';
 
 interface ForensicReadinessProps {
   readiness: ReadinessAssessment | null;
   onRefresh: () => void;
 }
 
-const getStatusBadgeClass = (status: string) => {
-  switch (status) {
-    case 'validated': return 'badge-teal';
-    case 'collected': return 'badge-blue';
-    case 'available': return 'badge-amber';
-    case 'unavailable':
-    case 'missing': return 'badge-red';
-    default: return 'badge-neutral';
-  }
-};
+const STATUS_OPTIONS: [string, string][] = [
+  ['missing', 'Missing'],
+  ['unavailable', 'Unavailable'],
+  ['available', 'Available'],
+  ['collected', 'Collected'],
+  ['validated', 'Validated'],
+  ['not_applicable', 'Not applicable']
+];
 
-export const ForensicReadiness: React.FC<ForensicReadinessProps> = ({
-  readiness,
-  onRefresh
-}) => {
+export const ForensicReadiness: React.FC<ForensicReadinessProps> = ({ readiness, onRefresh }) => {
   const [updatingSource, setUpdatingSource] = useState<string | null>(null);
   const [statusChangeMessage, setStatusChangeMessage] = useState<string | null>(null);
+  const [methodologyOpen, setMethodologyOpen] = useState(false);
 
   const handleStatusChange = async (sourceKey: string, newStatus: string) => {
     setUpdatingSource(sourceKey);
     try {
       await api.updateSourceStatus(sourceKey, newStatus);
-      setStatusChangeMessage(`Updated ${sourceKey} status to '${newStatus}'. Recalculating weighted readiness.`);
+      setStatusChangeMessage(`${sourceKey} set to ${labelize(newStatus)}. Score recalculated.`);
       onRefresh();
       setTimeout(() => setStatusChangeMessage(null), 4000);
     } catch (err: any) {
@@ -44,116 +43,92 @@ export const ForensicReadiness: React.FC<ForensicReadinessProps> = ({
   if (!readiness) {
     return (
       <div className="page-container page-empty">
-        <Gauge size={40} className="empty-state-icon text-muted" style={{ marginBottom: 'var(--space-3)' }} />
-        <div className="page-empty-title">Readiness Assessment Not Assessed</div>
-        <div className="page-empty-hint">
-          Connect Ubuntu telemetry agent or load baseline configuration to compute weighted forensic readiness.
-        </div>
+        <Gauge size={32} />
+        <div className="page-empty-title">Readiness not assessed</div>
+        <div className="page-empty-hint">Waiting for the backend to report evidence source status.</div>
       </div>
     );
   }
 
+  const tone = readinessTone(readiness.score);
+  const missing = readiness.sources.filter((s) => s.factor === 0).length;
+
   return (
     <div className="page-container page-stack">
 
-      {/* Top Banner: Scientific Model & Core Score */}
-      <div className="card card-accent">
-        <div className="hero-row">
-          <div>
-            <div className="eyebrow">Operational Readiness Model</div>
-            <div className="hero-title" style={{ fontSize: '20px', marginTop: '2px' }}>
-              Threat-Informed Forensic Readiness: {readiness.score.toFixed(1)}%
+      {/* Summary */}
+      <div className="card">
+        <div className="card-body row-between wrap" style={{ alignItems: 'flex-end' }}>
+          <div className="stack" style={{ gap: 2 }}>
+            <div className="kpi-label">
+              Forensic readiness
+              <InfoTip label="How readiness is calculated">
+                100 × Σ(wᵢ·sᵢ) / Σ(wᵢ) over applicable sources. See Methodology for factors and threat weighting.
+              </InfoTip>
             </div>
-            <div className="hero-desc">
-              Measures the degree to which digital evidence is readily preserved, accessible, and cryptographically verifiable
-              to reconstruct incidents without compromising ongoing enterprise operations.
+            <div className={`kpi-value ${tone === 'crit' ? 'text-crit' : tone === 'warn' ? 'text-warn' : ''}`} style={{ fontSize: 28 }}>
+              {readiness.score.toFixed(1)}%
             </div>
-            <div style={{ marginTop: 'var(--space-2)' }}>
-              <ReadinessWeightingBadge readiness={readiness} />
+            <div className="kpi-sub">
+              Score {readiness.weighted_sum.toFixed(2)} / {readiness.total_weight.toFixed(2)} · {sentenceCase(readiness.category)}
             </div>
           </div>
 
-          <div className="row-lg">
-            <div className="stat-chip">
-              <div className="label">Category</div>
-              <div className="stat-chip-value text-teal">{readiness.category}</div>
-            </div>
-            <div className="stat-chip">
-              <div className="label">Source Coverage</div>
-              <div className="stat-chip-value">{readiness.coverage_percentage}%</div>
-            </div>
+          <div className="row-lg wrap">
+            <dl className="kv">
+              <dt>Coverage</dt><dd className="num">{readiness.coverage_percentage}%</dd>
+              <dt>Gaps</dt><dd><span className="num">{readiness.gaps_count}</span> below collected{missing > 0 && <span className="text-warn"> · {missing} missing</span>}</dd>
+              <dt>Weighting</dt><dd><ReadinessWeightingBadge readiness={readiness} /></dd>
+            </dl>
+            <button className="btn btn-secondary" onClick={() => setMethodologyOpen(true)}>
+              <BookOpen size={13} /> Methodology
+            </button>
           </div>
         </div>
-
-        {/* Mathematical Model Callout */}
-        <div className="panel-inset meta-strip">
-          <div>
-            <span className="text-muted">Mathematical Formula: </span>
-            <span className="mono text-teal" style={{ fontWeight: 600 }}>{readiness.formula}</span>
-          </div>
-          <div className="row wrap" style={{ gap: 'var(--space-4)' }}>
-            <span>Numerator: Σ(wᵢ × sᵢ) = <b>{readiness.weighted_sum.toFixed(3)}</b></span>
-            <span>Denominator: Σ(wᵢ) = <b>{readiness.total_weight.toFixed(3)}</b></span>
-            <span>Threat Context: <b>{readiness.threat_context}</b></span>
-          </div>
-        </div>
-
-        {statusChangeMessage && <div className="notice">{statusChangeMessage}</div>}
+        {statusChangeMessage && <div className="card-footer text-sm text-secondary">{statusChangeMessage}</div>}
       </div>
 
-      {/* Evidence Source Status Table */}
+      {/* Evidence sources */}
       <div className="card">
         <div className="card-header">
-          <span className="card-title">
-            <Gauge size={16} className="text-teal" />
-            Monitored Evidence Sources & Readiness Factors (wᵢ × sᵢ)
-          </span>
-          <span className="text-sm text-muted">
-            Model factors: Available (0.60) | Collected (0.85) | Validated (1.00) | Missing (0.00)
-          </span>
+          <span className="card-title">Evidence sources</span>
+          <span className="card-meta">{readiness.sources.length} monitored</span>
         </div>
-
         <div className="data-table-container">
           <table className="data-table">
             <thead>
               <tr>
-                <th>Evidence Source</th>
+                <th>Source</th>
                 <th>Category</th>
-                <th>Threat Weight (wᵢ)</th>
                 <th>Status</th>
-                <th>Factor (sᵢ)</th>
-                <th>Weighted Contribution</th>
-                <th>Acquisition Cost</th>
-                <th>Technical State / Source Path</th>
-                <th>Simulate Lifecycle</th>
+                <th>Details</th>
+                <th className="num">Weight</th>
+                <th className="num">Factor</th>
+                <th className="num">Contribution</th>
+                <th className="num">Cost</th>
+                <th className="actions">Set status</th>
               </tr>
             </thead>
             <tbody>
               {readiness.sources.map((s) => (
                 <tr key={s.source_key}>
-                  <td className="cell-strong">{s.source_name}</td>
-                  <td><span className="badge badge-neutral">{s.category}</span></td>
-                  <td className={`mono ${s.weight >= 0.85 ? 'text-teal' : 'text-primary'}`}>{s.weight.toFixed(2)}</td>
-                  <td>
-                    <span className={`badge ${getStatusBadgeClass(s.status)}`}>{s.status.toUpperCase()}</span>
-                  </td>
-                  <td className="mono">{s.factor.toFixed(2)}</td>
-                  <td className="mono cell-strong">{(s.weight * s.factor).toFixed(3)}</td>
-                  <td className="mono text-muted">{s.collection_cost.toFixed(1)} units</td>
-                  <td className="cell-note" style={{ maxWidth: '240px' }}>{s.details}</td>
-                  <td>
+                  <td className="cell-primary">{s.source_name}</td>
+                  <td className="cell-secondary">{s.category}</td>
+                  <td><StatusDot tone={sourceStatusTone(s.status, s.weight)}>{labelize(s.status)}</StatusDot></td>
+                  <td className="cell-wrap" title={s.details}>{s.details}</td>
+                  <td className="num">{s.weight.toFixed(2)}</td>
+                  <td className="num">{s.factor.toFixed(2)}</td>
+                  <td className="num text-heading">{(s.weight * s.factor).toFixed(3)}</td>
+                  <td className="num cell-secondary">{s.collection_cost.toFixed(0)}</td>
+                  <td className="actions">
                     <select
                       className="form-control form-control-sm"
+                      aria-label={`Set status for ${s.source_name}`}
                       value={s.status}
                       disabled={updatingSource === s.source_key}
                       onChange={(e) => handleStatusChange(s.source_key, e.target.value)}
                     >
-                      <option value="missing">Missing (0.00)</option>
-                      <option value="unavailable">Unavailable (0.00)</option>
-                      <option value="available">Available (0.60)</option>
-                      <option value="collected">Collected (0.85)</option>
-                      <option value="validated">Validated (1.00)</option>
-                      <option value="not_applicable">Not Applicable</option>
+                      {STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </td>
                 </tr>
@@ -163,67 +138,49 @@ export const ForensicReadiness: React.FC<ForensicReadinessProps> = ({
         </div>
       </div>
 
-      {/* Readiness Gaps & Remediation Recommendations */}
+      {/* Gaps & remediation */}
       <div className="grid-2">
-        {/* Gap Analysis */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title">
-              <AlertOctagon size={16} className="text-amber" />
-              Forensic Readiness Gap Analysis ({readiness.gaps.length} Gaps)
-            </span>
-            <span className="badge badge-amber">Deficiencies &lt; 0.85</span>
+            <span className="card-title">Readiness gaps</span>
+            <span className="card-meta">Sources below collected (sᵢ &lt; 0.85)</span>
           </div>
-
           {readiness.gaps.length > 0 ? (
-            <div className="stack">
+            <div className="list">
               {readiness.gaps.map((gap) => (
-                <div
-                  key={gap.source_key}
-                  className={`panel ${gap.weight >= 0.85 ? 'panel-accent-red' : 'panel-accent-amber'}`}
-                >
-                  <div className="row-between" style={{ marginBottom: 'var(--space-1)' }}>
-                    <span className="strong" style={{ fontSize: '12.5px' }}>{gap.source_name}</span>
-                    <span className="mono badge badge-red badge-sm">Penalty: -{gap.penalty.toFixed(2)} pts</span>
+                <div key={gap.source_key} className="list-row stack" style={{ gap: 3 }}>
+                  <div className="row-between">
+                    <StatusDot tone={sourceStatusTone(gap.status, gap.weight)}>
+                      <span className="medium text-heading">{gap.source_name}</span>
+                    </StatusDot>
+                    <span className="text-sm text-secondary num">−{gap.penalty.toFixed(2)} weighted pts</span>
                   </div>
-                  <div className="text-sm text-secondary">
-                    Current Status: <b className="uppercase">{gap.status}</b> (factor {gap.current_factor})
-                  </div>
-                  <div className="text-sm text-teal" style={{ marginTop: 'var(--space-1)' }}>
-                    Remediation: {gap.remediation}
-                  </div>
+                  <div className="text-sm text-secondary">{labelize(gap.status)} · {gap.remediation}</div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="empty-state">No readiness gaps — every applicable source is collected or validated.</div>
+            <div className="empty-state">No gaps. Every applicable source is collected or validated.</div>
           )}
         </div>
 
-        {/* Priority Remediation Recommendations */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title">
-              <TrendingUp size={16} className="text-teal" />
-              Priority Remediation Actions
-            </span>
-            <span className="badge badge-teal">ROI Impact Ranking</span>
+            <span className="card-title">Remediation priorities</span>
+            <span className="card-meta">Impact = score gain if fully validated</span>
           </div>
-
           {readiness.recommendations.length > 0 ? (
-            <div className="stack">
+            <div className="list">
               {readiness.recommendations.map((rec) => (
-                <div key={rec.source} className="panel row-between">
-                  <div>
-                    <div className="row" style={{ marginBottom: '3px' }}>
-                      <span className={`badge badge-xs ${rec.priority === 'HIGH' ? 'badge-red' : 'badge-amber'}`}>
-                        {rec.priority}
-                      </span>
-                      <span className="strong text-base">{rec.source}</span>
-                    </div>
+                <div key={rec.source} className="list-row row-between" style={{ alignItems: 'flex-start' }}>
+                  <div className="stack grow" style={{ gap: 3 }}>
+                    <StatusDot tone={rec.priority === 'HIGH' ? 'warn' : 'neutral'}>
+                      <span className="medium text-heading">{rec.source}</span>
+                      <span className="text-xs text-muted">{labelize(rec.priority)} priority</span>
+                    </StatusDot>
                     <div className="text-sm text-secondary">{rec.action}</div>
                   </div>
-                  <div className="badge badge-teal nowrap">{rec.impact}</div>
+                  <span className="text-sm text-heading num nowrap">{rec.impact.replace(' potential readiness increase', '')}</span>
                 </div>
               ))}
             </div>
@@ -233,6 +190,7 @@ export const ForensicReadiness: React.FC<ForensicReadinessProps> = ({
         </div>
       </div>
 
+      {methodologyOpen && <MethodologyDrawer readiness={readiness} onClose={() => setMethodologyOpen(false)} />}
     </div>
   );
 };

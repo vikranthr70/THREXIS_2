@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ListOrdered, Sliders, CheckCircle2, XCircle, BarChart2, Vault, RotateCcw, ArrowRight } from 'lucide-react';
+import { Vault, RotateCcw, ArrowRight } from 'lucide-react';
 import type {
   PrioritizationResult,
   StrategyComparisonItem,
@@ -8,6 +8,7 @@ import type {
 } from '../types';
 import { api } from '../services/api';
 import { AcquisitionSummary } from '../components/AcquisitionSummary';
+import { StatusDot } from '../components/ui';
 import { PRIORITIZATION_CONTEXTS, type PrioritizationContext } from '../utils/threatContext';
 
 interface EvidencePrioritizationProps {
@@ -20,6 +21,17 @@ interface EvidencePrioritizationProps {
   onRefresh: () => void;
   onNavigateToVault: () => void;
 }
+
+const STRATEGIES: { id: string; label: string; description: string; behaviour: string }[] = [
+  { id: 'adaptive', label: 'Adaptive (threat-informed)', description: 'Ranks by ATT&CK affinity × weight × availability ÷ cost.', behaviour: 'Selects the evidence most relevant to the detected technique first.' },
+  { id: 'static', label: 'Static order', description: 'Fixed priority order, ignores detections.', behaviour: 'Misses high-value evidence when the attack differs from the default order.' },
+  { id: 'random', label: 'Random', description: 'Random order within the budget.', behaviour: 'High variance; unpredictable gaps.' },
+  { id: 'threat_agnostic', label: 'Threat-agnostic', description: 'Ranks by availability ÷ cost only.', behaviour: 'Favours cheap sources regardless of relevance.' },
+  { id: 'frozen_context', label: 'Frozen context', description: 'Uses the baseline model and never adapts.', behaviour: 'Does not follow a change in attacker behaviour.' }
+];
+const strategyLabel = (id: string) => STRATEGIES.find((s) => s.id === id)?.label ?? id;
+
+const recallClass = (r: number) => (r < 0.5 ? 'text-crit' : r < 0.8 ? 'text-warn' : 'text-heading');
 
 export const EvidencePrioritization: React.FC<EvidencePrioritizationProps> = ({
   context,
@@ -34,7 +46,6 @@ export const EvidencePrioritization: React.FC<EvidencePrioritizationProps> = ({
   const [strategy, setStrategy] = useState<string>('adaptive');
   const [result, setResult] = useState<PrioritizationResult | null>(null);
   const [comparison, setComparison] = useState<StrategyComparisonItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
   const [preserving, setPreserving] = useState<boolean>(false);
   const [acquisition, setAcquisition] = useState<AcquireSelectionResult | null>(null);
 
@@ -54,246 +65,158 @@ export const EvidencePrioritization: React.FC<EvidencePrioritizationProps> = ({
     }
   };
 
-  const runPrioritization = async () => {
-    setLoading(true);
-    try {
-      const data = await api.runPrioritization(strategy, budget, threatContext);
-      setResult(data);
-      const compData = await api.compareStrategies(budget, threatContext);
-      setComparison(compData.strategies_comparison);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    runPrioritization();
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.runPrioritization(strategy, budget, threatContext);
+        const compData = await api.compareStrategies(budget, threatContext);
+        if (cancelled) return;
+        setResult(data);
+        setComparison(compData.strategies_comparison);
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [strategy, budget, threatContext]);
 
-  const STRATEGY_DESCRIPTIONS: Record<string, string> = {
-    'adaptive': 'Dynamic utility ranking based on observed MITRE ATT&CK technique affinity, availability factor, and acquisition cost.',
-    'static': 'Fixed baseline priority order regardless of observed security events or active threats.',
-    'random': 'Stochastic baseline evidence selection within collection budget limit.',
-    'threat_agnostic': 'Ranks evidence solely by availability-to-cost ratio, completely ignoring active attack behavior.',
-    'frozen_context': 'Uses initial baseline threat model but refuses to adapt when telemetry indicates threat context shifts.'
-  };
+  const current = STRATEGIES.find((s) => s.id === strategy);
 
   return (
     <div className="page-container page-stack">
-      
-      {/* Top Controls Card: Budget & Strategy Configuration */}
-      <div className="card card-accent">
-        <div className="card-header">
-          <span className="card-title">
-            <Sliders size={16} className="text-teal" />
-            Adaptive Prioritization Parameters & Threat Context
-          </span>
-          <span className="badge badge-teal">Core Research Optimization</span>
-        </div>
 
-        <div className="grid-3" style={{ marginBottom: '14px' }}>
-          {/* Strategy selector */}
+      {/* Parameters */}
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">Parameters</span>
+          <span className="card-meta">{current?.description}</span>
+        </div>
+        <div className="card-body grid-3" style={{ gap: 20 }}>
           <div>
-            <label className="label" htmlFor="prio-strategy" style={{ marginBottom: '6px' }}>
-              Selection Strategy
-            </label>
-            <select
-              id="prio-strategy"
-              className="form-control"
-              value={strategy}
-              onChange={(e) => setStrategy(e.target.value)}
-            >
-              <option value="adaptive">1. Adaptive Threat-Informed (Recommended)</option>
-              <option value="static">2. Static Selection (Fixed Baseline)</option>
-              <option value="random">3. Random Selection (Stochastic Baseline)</option>
-              <option value="threat_agnostic">4. Threat-Agnostic (Cost-Availability Only)</option>
-              <option value="frozen_context">5. Frozen-Context (Stale Model)</option>
+            <label className="field-label" htmlFor="prio-strategy">Strategy</label>
+            <select id="prio-strategy" className="form-control" value={strategy} onChange={(e) => setStrategy(e.target.value)}>
+              {STRATEGIES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
             </select>
           </div>
 
-          {/* Budget Limit Slider */}
           <div>
-            <div className="row-between" style={{ marginBottom: '6px' }}>
-              <label className="label" htmlFor="prio-budget">
-                Collection Budget Constraint
-              </label>
-              <span className="mono text-teal" style={{ fontWeight: 600 }}>
-                {budget.toFixed(1)} Units
-              </span>
+            <div className="row-between">
+              <label className="field-label" htmlFor="prio-budget">Collection budget</label>
+              <span className="text-sm text-heading num">{budget} units</span>
             </div>
             <input
-              id="prio-budget"
-              type="range"
-              min="15"
-              max="120"
-              step="5"
-              value={budget}
+              id="prio-budget" type="range" min="15" max="120" step="5" value={budget}
               onChange={(e) => onBudgetChange(parseFloat(e.target.value))}
               className="form-range"
             />
-            <div className="meter-scale" style={{ marginTop: '2px' }}>
-              <span>15 (Constrained)</span>
-              <span>60 (Moderate)</span>
-              <span>120 (Permissive)</span>
-            </div>
+            <div className="range-scale"><span>15</span><span>60</span><span>120</span></div>
           </div>
 
-          {/* Threat Context */}
           <div>
-            <label className="label" htmlFor="prio-context" style={{ marginBottom: '6px' }}>
-              Observed Threat Context
-            </label>
-            <select
-              id="prio-context"
-              className="form-control"
-              value={threatContext}
-              onChange={(e) => onOverrideContext(e.target.value)}
-            >
-              {PRIORITIZATION_CONTEXTS.map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
+            <label className="field-label" htmlFor="prio-context">Threat context</label>
+            <select id="prio-context" className="form-control" value={threatContext} onChange={(e) => onOverrideContext(e.target.value)}>
+              {PRIORITIZATION_CONTEXTS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
-            <div className="row-sm wrap" style={{ marginTop: '6px' }}>
-              <span className={`badge badge-xs ${context.auto ? 'badge-teal' : 'badge-amber'}`}>
-                {context.auto ? 'AUTO' : 'MANUAL'}
-              </span>
+            <div className="row wrap" style={{ marginTop: 6 }}>
+              <StatusDot tone={context.auto ? 'ok' : 'warn'}>{context.auto ? 'Auto' : 'Manual'}</StatusDot>
               <span className="text-xs text-muted">{context.note}</span>
               {!context.auto && (
-                <button className="btn btn-secondary btn-sm" onClick={() => onOverrideContext(null)}>
+                <button className="btn btn-ghost btn-sm" onClick={() => onOverrideContext(null)}>
                   <RotateCcw size={11} /> Follow detections
                 </button>
               )}
             </div>
           </div>
         </div>
-
-        <div className="panel-inset text-md text-secondary" style={{ padding: 'var(--space-2) var(--space-3)' }}>
-          <b className="text-teal">Strategy Logic: </b>
-          {STRATEGY_DESCRIPTIONS[strategy]}
-        </div>
       </div>
 
-      {/* KPI Cards: Budget Utilization, Recall, Precision */}
       {result && (
         <div className="grid-4">
-          <div className="card stat-card">
-            <div className="label">Budget Allocated / Used</div>
-            <div className="stat-value">{result.budget_used.toFixed(1)} / {result.budget_limit.toFixed(1)}</div>
-            <div className="stat-sub text-teal">
-              {result.budget_utilization_pct}% utilization ({result.remaining_budget.toFixed(1)} rem)
-            </div>
+          <div className="card kpi">
+            <div className="kpi-label">Budget used</div>
+            <div className="kpi-value">{result.budget_used.toFixed(0)} <span className="text-secondary" style={{ fontSize: 16 }}>/ {result.budget_limit.toFixed(0)}</span></div>
+            <div className="kpi-sub">{result.budget_utilization_pct}% utilized · {result.remaining_budget.toFixed(0)} remaining</div>
           </div>
-
-          <div className="card stat-card">
-            <div className="label">Relevant Evidence Recall</div>
-            <div className={`stat-value ${result.metrics.recall >= 0.8 ? 'text-teal' : 'text-amber'}`}>
-              {(result.metrics.recall * 100).toFixed(0)}%
-            </div>
-            <div className="stat-sub">
-              {result.metrics.true_positives} of {result.metrics.total_relevant} critical sources captured
-            </div>
+          <div className="card kpi">
+            <div className="kpi-label">Critical evidence recall</div>
+            <div className={`kpi-value ${recallClass(result.metrics.recall)}`}>{(result.metrics.recall * 100).toFixed(0)}%</div>
+            <div className="kpi-sub">{result.metrics.true_positives} of {result.metrics.total_relevant} critical sources selected</div>
           </div>
-
-          <div className="card stat-card">
-            <div className="label">Selection Precision</div>
-            <div className="stat-value">{(result.metrics.precision * 100).toFixed(0)}%</div>
-            <div className="stat-sub">Fraction of acquired items matching threat</div>
+          <div className="card kpi">
+            <div className="kpi-label">Precision</div>
+            <div className="kpi-value">{(result.metrics.precision * 100).toFixed(0)}%</div>
+            <div className="kpi-sub">Selected sources that are critical</div>
           </div>
-
-          <div className="card stat-card">
-            <div className="label">Cost per Relevant Source</div>
-            <div className="stat-value">{result.metrics.cost_per_relevant_item.toFixed(1)} units</div>
-            <div className="stat-sub">Acquisition resource efficiency</div>
+          <div className="card kpi">
+            <div className="kpi-label">Cost per critical source</div>
+            <div className="kpi-value">{result.metrics.cost_per_relevant_item.toFixed(1)}</div>
+            <div className="kpi-sub">Budget units</div>
           </div>
         </div>
       )}
 
-      {/* Ranked Candidate Sources Table */}
       {result && (
         <div className="card">
           <div className="card-header">
-            <span className="card-title">
-              <ListOrdered size={16} className="text-teal" />
-              Ranked Evidence Candidate Items ({result.selected_sources.length} Selected within Budget)
-            </span>
-            <div className="row-sm">
-              <span className="badge badge-neutral">Greedy Knapsack Budget Constraint</span>
+            <span className="card-title">Ranked evidence</span>
+            <div className="row">
+              <span className="card-meta">{result.selected_sources.length} selected · greedy knapsack</span>
               {activeCase && (
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={handlePreserveSelection}
                   disabled={preserving || result.selected_sources.length === 0}
-                  title={`Preserve the selected sources into the Evidence Vault for ${activeCase.case_id}`}
+                  title={`Preserve the selected sources for ${activeCase.case_id}`}
                 >
                   <Vault size={12} />
-                  {preserving ? 'Preserving…' : `Preserve ${result.selected_sources.length} Selected for ${activeCase.case_id}`}
+                  {preserving ? 'Preserving…' : `Preserve ${result.selected_sources.length} selected`}
                 </button>
               )}
             </div>
           </div>
 
           {acquisition && (
-            <div style={{ marginBottom: 'var(--space-3)' }}>
-              <AcquisitionSummary result={acquisition} onDismiss={() => setAcquisition(null)} />
-              <button className="btn btn-secondary btn-sm" style={{ marginTop: 'var(--space-2)' }} onClick={onNavigateToVault}>
-                Open Evidence Vault <ArrowRight size={12} />
-              </button>
-            </div>
+            <AcquisitionSummary
+              result={acquisition}
+              onDismiss={() => setAcquisition(null)}
+              action={<button className="btn btn-ghost btn-sm" onClick={onNavigateToVault}>Open Vault <ArrowRight size={12} /></button>}
+            />
           )}
 
-          <div className="data-table-container">
+          <div className="data-table-container" style={acquisition ? { borderTop: '1px solid var(--border)' } : undefined}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Rank</th>
-                  <th>Evidence Source</th>
+                  <th className="num">#</th>
+                  <th>Source</th>
                   <th>Category</th>
-                  <th>Priority Score</th>
-                  <th>Threat Affinity</th>
-                  <th>Acquisition Cost</th>
-                  <th>Availability Factor</th>
-                  <th>Status Decision</th>
-                  <th>Remaining Budget</th>
-                  <th>Selection Rationale</th>
+                  <th>Decision</th>
+                  <th>Rationale</th>
+                  <th className="num">Priority</th>
+                  <th className="num">Affinity</th>
+                  <th className="num">Availability</th>
+                  <th className="num">Cost</th>
+                  <th className="num">Budget left</th>
                 </tr>
               </thead>
               <tbody>
                 {result.ranked_items.map((item, idx) => (
                   <tr key={item.source_key} className={item.selected ? '' : 'row-dimmed'}>
-                    <td className={`mono ${item.selected ? 'text-teal' : 'text-muted'}`} style={{ fontWeight: 600 }}>
-                      #{idx + 1}
-                    </td>
-                    <td className={item.selected ? 'cell-strong' : ''} style={{ fontWeight: 600 }}>
-                      {item.source_name}
-                    </td>
-                    <td><span className="badge badge-neutral">{item.category}</span></td>
-                    <td className={`mono ${item.selected ? 'text-teal' : 'text-primary'}`} style={{ fontWeight: 700 }}>
-                      {item.priority_score.toFixed(3)}
-                    </td>
-                    <td className="mono">
-                      {item.threat_affinity !== undefined ? item.threat_affinity.toFixed(2) : 'N/A'}
-                    </td>
-                    <td className="mono">{item.cost.toFixed(1)} u</td>
-                    <td className="mono">{item.availability_factor.toFixed(2)}</td>
+                    <td className="num cell-secondary">{idx + 1}</td>
+                    <td className="cell-primary">{item.source_name}</td>
+                    <td className="cell-secondary">{item.category}</td>
                     <td>
-                      {item.selected ? (
-                        <span className="badge badge-teal">
-                          <CheckCircle2 size={11} /> SELECTED
-                        </span>
-                      ) : (
-                        <span className="badge badge-red" title={item.rejection_reason}>
-                          <XCircle size={11} /> EXCLUDED
-                        </span>
-                      )}
+                      {item.selected
+                        ? <StatusDot tone="ok">Selected</StatusDot>
+                        : <StatusDot tone="muted" title={item.rejection_reason}>Excluded</StatusDot>}
                     </td>
-                    <td className="mono text-muted">
-                      {item.remaining_after !== undefined ? `${item.remaining_after} u` : 'N/A'}
-                    </td>
-                    <td className="cell-note">
-                      {item.rationale}
-                    </td>
+                    <td className="cell-secondary truncate" style={{ maxWidth: 300 }} title={item.rationale}>{item.rationale}</td>
+                    <td className="num text-heading">{item.priority_score.toFixed(3)}</td>
+                    <td className="num">{item.threat_affinity !== undefined ? item.threat_affinity.toFixed(2) : '—'}</td>
+                    <td className="num">{item.availability_factor.toFixed(2)}</td>
+                    <td className="num">{item.cost.toFixed(0)}</td>
+                    <td className="num cell-secondary">{item.remaining_after !== undefined ? item.remaining_after : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -302,28 +225,23 @@ export const EvidencePrioritization: React.FC<EvidencePrioritizationProps> = ({
         </div>
       )}
 
-      {/* 5-Strategy Comparative Benchmark Matrix */}
       <div className="card">
         <div className="card-header">
-          <span className="card-title">
-            <BarChart2 size={16} className="text-teal" />
-            Comparative Benchmark: All 5 Prioritization Strategies (Budget = {budget.toFixed(0)} Units)
-          </span>
-          <span className="badge badge-teal">Academic Baseline Comparison</span>
+          <span className="card-title">Strategy comparison</span>
+          <span className="card-meta">Same budget ({budget}) and context ({threatContext})</span>
         </div>
-
         <div className="data-table-container">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Strategy</th>
-                <th>Sources Acquired</th>
-                <th>Budget Used</th>
-                <th>Utilization</th>
-                <th>Relevant Recall</th>
-                <th>Precision</th>
-                <th>Cost / Relevant Source</th>
-                <th>Academic Behavior</th>
+                <th>Behaviour</th>
+                <th className="num">Sources</th>
+                <th className="num">Budget used</th>
+                <th className="num">Utilization</th>
+                <th className="num">Recall</th>
+                <th className="num">Precision</th>
+                <th className="num">Cost / critical</th>
               </tr>
             </thead>
             <tbody>
@@ -331,25 +249,19 @@ export const EvidencePrioritization: React.FC<EvidencePrioritizationProps> = ({
                 const isSelected = comp.strategy === strategy;
                 return (
                   <tr key={comp.strategy} className={isSelected ? 'row-selected' : ''}>
-                    <td className={isSelected ? 'text-teal' : 'text-primary'} style={{ fontWeight: 600 }}>
-                      {comp.strategy.toUpperCase().replace('_', ' ')}
-                      {isSelected && <span className="badge badge-teal badge-xs" style={{ marginLeft: '6px' }}>ACTIVE</span>}
+                    <td className="cell-primary">
+                      {strategyLabel(comp.strategy)}
+                      {isSelected && <span className="text-xs text-muted"> · current</span>}
                     </td>
-                    <td className="mono">{comp.selected_count} sources</td>
-                    <td className="mono">{comp.budget_used.toFixed(1)} u</td>
-                    <td className="mono">{comp.utilization_pct.toFixed(1)}%</td>
-                    <td className="mono" style={{ fontWeight: 700, color: comp.recall >= 0.8 ? 'var(--teal-glow)' : (comp.recall >= 0.5 ? 'var(--amber-bright)' : 'var(--red-oxide-bright)') }}>
-                      {(comp.recall * 100).toFixed(0)}%
+                    <td className="cell-secondary truncate" style={{ maxWidth: 320 }}>
+                      {STRATEGIES.find((s) => s.id === comp.strategy)?.behaviour}
                     </td>
-                    <td className="mono">{(comp.precision * 100).toFixed(0)}%</td>
-                    <td className="mono">{comp.cost_per_relevant.toFixed(1)} u</td>
-                    <td className="cell-note">
-                      {comp.strategy === 'adaptive' && 'Optimal: Adapts to threat telemetry to select critical sources first.'}
-                      {comp.strategy === 'static' && 'Fixed baseline: Misses high-value evidence when attacks diverge from default order.'}
-                      {comp.strategy === 'random' && 'Stochastic: Exhibits high variance and unpredictable evidence gaps.'}
-                      {comp.strategy === 'threat_agnostic' && 'Cost-biased: Collects cheap irrelevant logs while missing critical authentication telemetry.'}
-                      {comp.strategy === 'frozen_context' && 'Stale context: Fails to detect pivots due to outdated threat priors.'}
-                    </td>
+                    <td className="num">{comp.selected_count}</td>
+                    <td className="num">{comp.budget_used.toFixed(0)}</td>
+                    <td className="num">{comp.utilization_pct.toFixed(1)}%</td>
+                    <td className={`num ${recallClass(comp.recall)}`}>{(comp.recall * 100).toFixed(0)}%</td>
+                    <td className="num">{(comp.precision * 100).toFixed(0)}%</td>
+                    <td className="num">{comp.cost_per_relevant.toFixed(1)}</td>
                   </tr>
                 );
               })}
@@ -357,7 +269,6 @@ export const EvidencePrioritization: React.FC<EvidencePrioritizationProps> = ({
           </table>
         </div>
       </div>
-
     </div>
   );
 };
