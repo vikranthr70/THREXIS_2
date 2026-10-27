@@ -164,31 +164,42 @@ class ForensicReadinessEngine:
         Only applicable sources are included.
         """
         sources = await self.get_all_sources(db)
-        
+
         total_weighted_readiness = 0.0
         total_weight = 0.0
-        
-        source_contributions = []
-        gaps = []
-        recommendations = []
-        
+
+        # ---- Pass 1: resolve effective weight/factor for every applicable
+        # source and accumulate the FINAL Σ(wᵢ) and Σ(wᵢ×sᵢ). Gap impact
+        # percentages depend on the final Σ(wᵢ), so they cannot be computed
+        # inside this loop (a partial running total made them order-dependent).
+        applicable = []
         for src in sources:
             if src.status == "not_applicable":
                 continue
-            
+
             weight = src.threat_relevance_weight
             # Dynamically boost weight if matching active threat context
             if threat_context == "T1110" and src.source_key in ["ssh_auth", "user_session", "network_conn"]:
                 weight = min(1.0, weight * 1.15)
-                
+
             factor = STATUS_FACTORS.get(src.status, 0.0)
             if factor is None:
                 continue
-                
+
             source_contribution = weight * factor
             total_weighted_readiness += source_contribution
             total_weight += weight
-            
+            applicable.append((src, weight, factor, source_contribution))
+
+        # ---- Pass 2: build per-source output, gaps and recommendations using
+        # the final Σ(wᵢ). Impact = score gain if this source reached factor 1.0:
+        #   100 × wᵢ × (1 − sᵢ) / Σ(wᵢ)
+        source_contributions = []
+        gaps = []
+        recommendations = []
+        impact_denominator = total_weight if total_weight > 0 else 1.0
+
+        for src, weight, factor, source_contribution in applicable:
             # Gaps are sources with factor < 0.85 (not yet collected or validated)
             if factor < 0.85:
                 gaps.append({
@@ -205,9 +216,9 @@ class ForensicReadinessEngine:
                     "priority": "HIGH" if weight >= 0.85 else "MEDIUM",
                     "source": src.source_name,
                     "action": src.remediation_action,
-                    "impact": f"+{round((weight * (1.0 - factor) / max(total_weight, 1.0)) * 100, 1)}% potential readiness increase"
+                    "impact": f"+{round((weight * (1.0 - factor) / impact_denominator) * 100, 1)}% potential readiness increase"
                 })
-            
+
             source_contributions.append({
                 "source_key": src.source_key,
                 "source_name": src.source_name,

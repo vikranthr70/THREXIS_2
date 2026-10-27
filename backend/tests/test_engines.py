@@ -29,6 +29,49 @@ async def test_forensic_readiness_calculation(test_db):
     assert new_assessment["score"] > assessment["score"]
 
 @pytest.mark.asyncio
+async def test_readiness_recommendation_impact_uses_final_total_weight(test_db):
+    """Regression: impact % must divide by the FINAL Σ(wᵢ), not a partial
+    running total, so it is independent of source iteration order."""
+    for ctx in (None, "T1110"):
+        assessment = await readiness_engine.calculate_readiness(test_db, threat_context=ctx)
+        total_weight = sum(s["weight"] for s in assessment["sources"])
+        assert assessment["total_weight"] == round(total_weight, 3)
+
+        # Core formula is unchanged: 100 × Σ(wᵢ×sᵢ) / Σ(wᵢ)
+        weighted_sum = sum(s["weight"] * s["factor"] for s in assessment["sources"])
+        assert assessment["score"] == round(100.0 * weighted_sum / total_weight, 1)
+
+        gaps_by_name = {g["source_name"]: g for g in assessment["gaps"]}
+        assert len(assessment["recommendations"]) == len(gaps_by_name) > 0
+        for rec in assessment["recommendations"]:
+            gap = gaps_by_name[rec["source"]]
+            expected = round(gap["weight"] * (1.0 - gap["current_factor"]) / total_weight * 100, 1)
+            assert rec["impact"] == f"+{expected}% potential readiness increase"
+
+        # Closing every gap fully should account for exactly the missing score
+        # (within rounding), which only holds when all impacts share one denominator.
+        total_gap_impact = sum(
+            g["weight"] * (1.0 - g["current_factor"]) / total_weight * 100 for g in assessment["gaps"]
+        )
+        non_gap_shortfall = sum(
+            s["weight"] * (1.0 - s["factor"]) / total_weight * 100
+            for s in assessment["sources"] if s["factor"] >= 0.85
+        )
+        assert abs((assessment["score"] + total_gap_impact + non_gap_shortfall) - 100.0) < 0.2
+
+@pytest.mark.asyncio
+async def test_readiness_threat_context_boost(test_db):
+    baseline = await readiness_engine.calculate_readiness(test_db)
+    boosted = await readiness_engine.calculate_readiness(test_db, threat_context="T1110")
+    assert baseline["threat_context"] == "Normal Baseline"
+    assert boosted["threat_context"] == "T1110"
+    base_w = {s["source_key"]: s["weight"] for s in baseline["sources"]}
+    boost_w = {s["source_key"]: s["weight"] for s in boosted["sources"]}
+    for key in ("ssh_auth", "user_session", "network_conn"):
+        assert boost_w[key] == min(1.0, base_w[key] * 1.15)
+    assert boost_w["audit_logs"] == base_w["audit_logs"]
+
+@pytest.mark.asyncio
 async def test_mitre_attack_engine():
     tech = mitre_engine.get_technique("T1110")
     assert tech is not None
