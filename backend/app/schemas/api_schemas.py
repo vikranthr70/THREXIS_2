@@ -48,3 +48,15 @@ class AcquireEvidenceInput(BaseModel):
     source_title: str
     event_ids: List[str]
     original_source_path: str = "/var/log/auth.log"
+
+class AcquireSelectionInput(BaseModel):
+    """Preserve a prioritized evidence selection for a case.
+
+    Pass source_keys to preserve exactly what the analyst saw selected on the
+    Prioritization page. Omit it to let the server run adaptive prioritization
+    with the given budget/threat context and preserve that selection.
+    """
+    case_id: str
+    source_keys: Optional[List[str]] = None
+    budget: Optional[float] = None
+    threat_context: Optional[str] = None

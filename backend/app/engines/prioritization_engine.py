@@ -5,61 +5,16 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.app.db.models import EvidenceSourceStatus, PrioritizationRecord
+from backend.app.core.threat_model import THREAT_AFFINITY_MATRIX, get_affinity
 
 class EvidencePrioritizationEngine:
     def __init__(self):
-        # Threat-informed relevance mapping matrix:
-        # Maps MITRE techniques to evidence source affinity scores [0.0 - 1.0]
-        self.threat_affinity_matrix = {
-            "T1110": {  # Brute Force
-                "ssh_auth": 1.00,
-                "user_session": 0.90,
-                "network_conn": 0.85,
-                "system_journal": 0.70,
-                "audit_logs": 0.80,
-                "sys_config": 0.40,
-                "priv_esc": 0.30,
-                "process_exec": 0.35,
-                "file_mod": 0.20
-            },
-            "T1548.003": {  # Sudo Abuse
-                "priv_esc": 1.00,
-                "audit_logs": 0.95,
-                "system_journal": 0.85,
-                "process_exec": 0.80,
-                "file_mod": 0.75,
-                "user_session": 0.60,
-                "ssh_auth": 0.50,
-                "sys_config": 0.50,
-                "network_conn": 0.20
-            },
-            "T1059.004": {  # Unix Shell
-                "process_exec": 1.00,
-                "audit_logs": 0.95,
-                "system_journal": 0.85,
-                "user_session": 0.70,
-                "file_mod": 0.60,
-                "network_conn": 0.50,
-                "priv_esc": 0.40,
-                "ssh_auth": 0.30,
-                "sys_config": 0.30
-            },
-            "BASELINE": {  # Default general security readiness
-                "ssh_auth": 0.75,
-                "system_journal": 0.75,
-                "audit_logs": 0.75,
-                "process_exec": 0.70,
-                "network_conn": 0.65,
-                "user_session": 0.65,
-                "priv_esc": 0.60,
-                "sys_config": 0.55,
-                "file_mod": 0.50
-            }
-        }
+        # Threat-informed relevance mapping lives in core/threat_model.py so the
+        # readiness engine uses the exact same model.
+        self.threat_affinity_matrix = THREAT_AFFINITY_MATRIX
 
     def _get_affinity(self, threat_technique: Optional[str], source_key: str) -> float:
-        matrix = self.threat_affinity_matrix.get(threat_technique or "BASELINE", self.threat_affinity_matrix["BASELINE"])
-        return matrix.get(source_key, 0.50)
+        return get_affinity(threat_technique, source_key)
 
     async def prioritize(
         self,

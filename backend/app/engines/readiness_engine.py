@@ -3,6 +3,7 @@ import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.app.db.models import EvidenceSourceStatus, ReadinessAssessmentHistory
+from backend.app.core.threat_model import BOOST_MULTIPLIER, boosted_sources, weight_profile
 
 STATUS_FACTORS = {
     "unknown": 0.00,
@@ -172,15 +173,17 @@ class ForensicReadinessEngine:
         # source and accumulate the FINAL Σ(wᵢ) and Σ(wᵢ×sᵢ). Gap impact
         # percentages depend on the final Σ(wᵢ), so they cannot be computed
         # inside this loop (a partial running total made them order-dependent).
+        boosted = set(boosted_sources(threat_context))
         applicable = []
         for src in sources:
             if src.status == "not_applicable":
                 continue
 
             weight = src.threat_relevance_weight
-            # Dynamically boost weight if matching active threat context
-            if threat_context == "T1110" and src.source_key in ["ssh_auth", "user_session", "network_conn"]:
-                weight = min(1.0, weight * 1.15)
+            # Boost sources critical to the active technique (shared threat model;
+            # for T1110 this is ssh_auth, user_session and network_conn).
+            if src.source_key in boosted:
+                weight = min(1.0, weight * BOOST_MULTIPLIER)
 
             factor = STATUS_FACTORS.get(src.status, 0.0)
             if factor is None:
@@ -259,7 +262,9 @@ class ForensicReadinessEngine:
             "gaps": gaps,
             "recommendations": recommendations,
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-            "threat_context": threat_context or "Normal Baseline"
+            "threat_context": threat_context or "Normal Baseline",
+            # Additive field: which weight adjustment was applied (None = baseline weights)
+            "weight_profile": weight_profile(threat_context)
         }
         
         return result_payload

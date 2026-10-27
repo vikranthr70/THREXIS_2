@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
 import { Vault, ShieldCheck, CheckCircle2, XCircle } from 'lucide-react';
-import type { EvidenceVaultItem, InvestigationCase, SecurityEvent } from '../types';
+import type { EvidenceVaultItem, InvestigationCase, AcquireSelectionResult } from '../types';
 import { api } from '../services/api';
+import { AcquisitionSummary } from '../components/AcquisitionSummary';
+import type { PrioritizationContext } from '../utils/threatContext';
 
 interface EvidenceVaultProps {
   vaultItems: EvidenceVaultItem[];
   activeCase: InvestigationCase | null;
-  events: SecurityEvent[];
+  /** Same context and budget as the Evidence Prioritization page. */
+  prioritizationContext: PrioritizationContext;
+  budget: number;
   onRefresh: () => void;
 }
 
@@ -21,13 +25,14 @@ const WORKFLOW_STEPS = [
 export const EvidenceVault: React.FC<EvidenceVaultProps> = ({
   vaultItems,
   activeCase,
-  events,
+  prioritizationContext,
+  budget,
   onRefresh
 }) => {
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [verificationResult, setVerificationResult] = useState<any>(null);
   const [acquiring, setAcquiring] = useState<boolean>(false);
-  const [acquireSuccessMsg, setAcquireSuccessMsg] = useState<string | null>(null);
+  const [acquisition, setAcquisition] = useState<AcquireSelectionResult | null>(null);
 
   const handleVerify = async (evidenceId: string) => {
     setVerifyingId(evidenceId);
@@ -42,28 +47,19 @@ export const EvidenceVault: React.FC<EvidenceVaultProps> = ({
     }
   };
 
-  const handleQuickAcquire = async () => {
+  // Preserves what adaptive prioritization selects for the active threat within the
+  // current budget, instead of always grabbing SSH telemetry. The server only creates
+  // vault items for sources backed by real collector telemetry; the rest are reported.
+  const handlePreserveForCase = async () => {
     if (!activeCase) return;
     setAcquiring(true);
     try {
-      // Pick all failure events
-      const relevantEventIds = events
-        .filter(e => e.event_type === 'ssh_auth_failure' || e.event_type === 'sudo_event')
-        .map(e => e.event_id);
-
-      const targetIds = relevantEventIds.length > 0 ? relevantEventIds : events.map(e => e.event_id);
-
-      const newItem = await api.acquireEvidence(
-        activeCase.case_id,
-        'ssh_auth',
-        'SSH Authentication Telemetry',
-        targetIds,
-        '/var/log/auth.log'
-      );
-
-      setAcquireSuccessMsg(`Acquired ${newItem.record_count} events into Vault as ${newItem.evidence_id}. Cryptographic SHA-256 calculated.`);
+      const res = await api.acquireSelection(activeCase.case_id, {
+        budget,
+        threatContext: prioritizationContext.value
+      });
+      setAcquisition(res);
       onRefresh();
-      setTimeout(() => setAcquireSuccessMsg(null), 5000);
     } catch (err: any) {
       console.error(err);
     } finally {
@@ -87,10 +83,17 @@ export const EvidenceVault: React.FC<EvidenceVaultProps> = ({
           </div>
 
           {activeCase && (
-            <button className="btn btn-primary btn-lg" onClick={handleQuickAcquire} disabled={acquiring}>
-              <Vault size={14} />
-              {acquiring ? 'Preserving Evidence...' : 'Preserve Evidence for Active Case'}
-            </button>
+            <div className="stack-sm" style={{ alignItems: 'flex-end' }}>
+              <button className="btn btn-primary btn-lg" onClick={handlePreserveForCase} disabled={acquiring}>
+                <Vault size={14} />
+                {acquiring ? 'Preserving Evidence...' : 'Preserve Prioritized Evidence for Active Case'}
+              </button>
+              <span className="text-xs text-muted">
+                Adaptive selection · budget {budget} · context{' '}
+                <span className="mono">{prioritizationContext.value}</span>
+                {prioritizationContext.auto ? ' (auto)' : ' (manual)'}
+              </span>
+            </div>
           )}
         </div>
 
@@ -109,7 +112,7 @@ export const EvidenceVault: React.FC<EvidenceVaultProps> = ({
           })}
         </div>
 
-        {acquireSuccessMsg && <div className="notice">{acquireSuccessMsg}</div>}
+        {acquisition && <AcquisitionSummary result={acquisition} onDismiss={() => setAcquisition(null)} />}
       </div>
 
       {/* Vault Items Table */}
@@ -181,7 +184,7 @@ export const EvidenceVault: React.FC<EvidenceVaultProps> = ({
           <div className="empty-state">
             No forensic evidence preserved in the vault yet.
             {activeCase
-              ? ' Click "Preserve Evidence for Active Case" above to snapshot current telemetry with SHA-256 hashing.'
+              ? ' Click "Preserve Prioritized Evidence for Active Case" above to preserve the evidence prioritization selects, with SHA-256 hashing.'
               : ' Evidence can be preserved once an investigation case is open.'}
           </div>
         )}

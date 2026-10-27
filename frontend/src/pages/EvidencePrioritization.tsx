@@ -1,15 +1,58 @@
 import React, { useState, useEffect } from 'react';
-import { ListOrdered, Sliders, CheckCircle2, XCircle, BarChart2 } from 'lucide-react';
-import type { PrioritizationResult, StrategyComparisonItem } from '../types';
+import { ListOrdered, Sliders, CheckCircle2, XCircle, BarChart2, Vault, RotateCcw, ArrowRight } from 'lucide-react';
+import type {
+  PrioritizationResult,
+  StrategyComparisonItem,
+  InvestigationCase,
+  AcquireSelectionResult
+} from '../types';
 import { api } from '../services/api';
+import { AcquisitionSummary } from '../components/AcquisitionSummary';
+import { PRIORITIZATION_CONTEXTS, type PrioritizationContext } from '../utils/threatContext';
 
-export const EvidencePrioritization: React.FC = () => {
+interface EvidencePrioritizationProps {
+  /** Context in use: follows the detected technique unless manually overridden. */
+  context: PrioritizationContext;
+  onOverrideContext: (contextId: string | null) => void;
+  budget: number;
+  onBudgetChange: (budget: number) => void;
+  activeCase: InvestigationCase | null;
+  onRefresh: () => void;
+  onNavigateToVault: () => void;
+}
+
+export const EvidencePrioritization: React.FC<EvidencePrioritizationProps> = ({
+  context,
+  onOverrideContext,
+  budget,
+  onBudgetChange,
+  activeCase,
+  onRefresh,
+  onNavigateToVault
+}) => {
+  const threatContext = context.value;
   const [strategy, setStrategy] = useState<string>('adaptive');
-  const [budget, setBudget] = useState<number>(60);
-  const [threatContext, setThreatContext] = useState<string>('T1110');
   const [result, setResult] = useState<PrioritizationResult | null>(null);
   const [comparison, setComparison] = useState<StrategyComparisonItem[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  const [preserving, setPreserving] = useState<boolean>(false);
+  const [acquisition, setAcquisition] = useState<AcquireSelectionResult | null>(null);
+
+  const handlePreserveSelection = async () => {
+    if (!activeCase || !result) return;
+    setPreserving(true);
+    try {
+      const res = await api.acquireSelection(activeCase.case_id, {
+        sourceKeys: result.selected_sources.map((s) => s.source_key)
+      });
+      setAcquisition(res);
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setPreserving(false);
+    }
+  };
 
   const runPrioritization = async () => {
     setLoading(true);
@@ -87,7 +130,7 @@ export const EvidencePrioritization: React.FC = () => {
               max="120"
               step="5"
               value={budget}
-              onChange={(e) => setBudget(parseFloat(e.target.value))}
+              onChange={(e) => onBudgetChange(parseFloat(e.target.value))}
               className="form-range"
             />
             <div className="meter-scale" style={{ marginTop: '2px' }}>
@@ -106,13 +149,23 @@ export const EvidencePrioritization: React.FC = () => {
               id="prio-context"
               className="form-control"
               value={threatContext}
-              onChange={(e) => setThreatContext(e.target.value)}
+              onChange={(e) => onOverrideContext(e.target.value)}
             >
-              <option value="T1110">T1110: SSH Brute Force / Password Guessing</option>
-              <option value="T1548.003">T1548.003: Privilege Escalation / Sudo Abuse</option>
-              <option value="T1059.004">T1059.004: Unix Shell & Scripting Execution</option>
-              <option value="BASELINE">BASELINE: Normal Security Operations</option>
+              {PRIORITIZATION_CONTEXTS.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
             </select>
+            <div className="row-sm wrap" style={{ marginTop: '6px' }}>
+              <span className={`badge badge-xs ${context.auto ? 'badge-teal' : 'badge-amber'}`}>
+                {context.auto ? 'AUTO' : 'MANUAL'}
+              </span>
+              <span className="text-xs text-muted">{context.note}</span>
+              {!context.auto && (
+                <button className="btn btn-secondary btn-sm" onClick={() => onOverrideContext(null)}>
+                  <RotateCcw size={11} /> Follow detections
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -165,8 +218,30 @@ export const EvidencePrioritization: React.FC = () => {
               <ListOrdered size={16} className="text-teal" />
               Ranked Evidence Candidate Items ({result.selected_sources.length} Selected within Budget)
             </span>
-            <span className="badge badge-neutral">Knapsack Budget Constraint</span>
+            <div className="row-sm">
+              <span className="badge badge-neutral">Greedy Knapsack Budget Constraint</span>
+              {activeCase && (
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handlePreserveSelection}
+                  disabled={preserving || result.selected_sources.length === 0}
+                  title={`Preserve the selected sources into the Evidence Vault for ${activeCase.case_id}`}
+                >
+                  <Vault size={12} />
+                  {preserving ? 'Preserving…' : `Preserve ${result.selected_sources.length} Selected for ${activeCase.case_id}`}
+                </button>
+              )}
+            </div>
           </div>
+
+          {acquisition && (
+            <div style={{ marginBottom: 'var(--space-3)' }}>
+              <AcquisitionSummary result={acquisition} onDismiss={() => setAcquisition(null)} />
+              <button className="btn btn-secondary btn-sm" style={{ marginTop: 'var(--space-2)' }} onClick={onNavigateToVault}>
+                Open Evidence Vault <ArrowRight size={12} />
+              </button>
+            </div>
+          )}
 
           <div className="data-table-container">
             <table className="data-table">

@@ -110,3 +110,61 @@ async def test_api_prioritization_and_evaluation():
         assert eval_res.status_code == 200
         edata = eval_res.json()
         assert len(edata["eval_matrix"]) == 10
+
+@pytest.mark.asyncio
+async def test_api_vault_acquire_prioritized_selection():
+    """Vault preserves only sources backed by real collector telemetry and reports the rest."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        uid = uuid.uuid4().hex[:6]
+        events = [
+            {
+                "event_id": f"EVT-SEL-{uid}-{i}",
+                "host": "ubuntu-lab",
+                "timestamp": (now + datetime.timedelta(seconds=i)).isoformat(),
+                "source": "auth.log",
+                "event_type": "ssh_auth_failure",
+                "user": "testuser",
+                "source_ip": "192.168.56.201",
+                "message": f"Failed password for testuser from 192.168.56.201 port 6000{i} ssh2",
+                "raw_log": f"sshd[70{i}]: Failed password for testuser from 192.168.56.201 port 6000{i} ssh2"
+            }
+            for i in range(4)
+        ]
+        res = await ac.post(
+            "/api/v1/telemetry/ingest",
+            json={"collector_id": "test-agent", "events": events},
+            headers={"X-Collector-Key": settings.SECRET_COLLECTOR_KEY}
+        )
+        assert res.status_code == 200
+
+        cases = (await ac.get("/api/v1/investigation/cases")).json()
+        case = next(c for c in cases if c["primary_technique"] == "T1110")
+
+        # 1. Client-provided selection (what the Prioritization page shows as selected)
+        res = await ac.post("/api/v1/vault/acquire-selection", json={
+            "case_id": case["case_id"],
+            "source_keys": ["user_session", "ssh_auth", "network_conn", "file_mod"]
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["selection"]["origin"] == "client_selection"
+        assert [a["source_key"] for a in data["acquired"]] == ["ssh_auth"]
+        assert data["acquired"][0]["record_count"] >= 4
+        reasons = {s["source_key"]: s["reason"] for s in data["skipped"]}
+        assert "host-side acquisition" in reasons["user_session"]
+        assert "host-side acquisition" in reasons["network_conn"]
+        assert "nothing to preserve" in reasons["file_mod"]
+
+        # 2. Server-side adaptive selection (what the Vault button uses)
+        res = await ac.post("/api/v1/vault/acquire-selection", json={"case_id": case["case_id"], "budget": 60})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["selection"]["origin"] == "server_adaptive"
+        assert data["selection"]["run_id"]
+        assert data["selection"]["threat_context"] == "T1110"
+        assert "ssh_auth" in data["selection"]["source_keys"]
+
+        # 3. Unknown case
+        res = await ac.post("/api/v1/vault/acquire-selection", json={"case_id": "CASE-NOPE", "source_keys": ["ssh_auth"]})
+        assert res.status_code == 404

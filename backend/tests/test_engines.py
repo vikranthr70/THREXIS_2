@@ -224,3 +224,30 @@ def test_offline_research_evaluation():
     assert len(exp["eval_matrix"]) == 10  # 2 budgets * 5 strategies
     shift = evaluation_engine.run_context_shift_experiment()
     assert len(shift["shift_data"]) == 10  # 2 phases * 5 strategies
+
+def test_shared_threat_model_preserves_t1110_boost_and_covers_other_techniques():
+    from backend.app.core.threat_model import boosted_sources, weight_profile, get_affinity, resolve_technique
+    # Unifying the models must not change the original T1110 behaviour.
+    assert set(boosted_sources("T1110")) == {"ssh_auth", "user_session", "network_conn"}
+    # Other modeled techniques now get a profile instead of silently using baseline weights.
+    assert set(boosted_sources("T1548.003")) == {"priv_esc", "audit_logs", "system_journal"}
+    assert set(boosted_sources("T1059.004")) == {"process_exec", "audit_logs", "system_journal"}
+    # Unmodeled technique / baseline -> no adjustment.
+    assert weight_profile("T1078.003") is None
+    assert weight_profile(None) is None
+    # Sub-techniques resolve to their modeled parent.
+    assert resolve_technique("T1110.001") == "T1110"
+    assert get_affinity("T1110.001", "ssh_auth") == 1.00
+
+
+@pytest.mark.asyncio
+async def test_readiness_and_prioritization_use_same_threat_model(test_db):
+    from backend.app.core.threat_model import boosted_sources
+    assessment = await readiness_engine.calculate_readiness(test_db, threat_context="T1548.003")
+    assert assessment["weight_profile"]["boosted_sources"] == boosted_sources("T1548.003")
+    baseline = await readiness_engine.calculate_readiness(test_db)
+    assert baseline["weight_profile"] is None
+    # Prioritization affinities come from the same matrix.
+    run = await prioritization_engine.prioritize(test_db, strategy="adaptive", budget=60, threat_context="T1548.003")
+    by_key = {i["source_key"]: i for i in run["ranked_items"]}
+    assert by_key["priv_esc"]["threat_affinity"] == 1.00

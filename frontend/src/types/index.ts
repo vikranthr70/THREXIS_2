@@ -82,6 +82,15 @@ export interface ReadinessAssessment {
   recommendations: RemediationRecommendation[];
   timestamp: string;
   threat_context: string;
+  /** Weight adjustment applied for the active technique; null/absent = baseline weights. */
+  weight_profile?: WeightProfile | null;
+}
+
+export interface WeightProfile {
+  technique: string;
+  boosted_sources: string[];
+  multiplier: number;
+  affinity_threshold: number;
 }
 
 export interface MitreTechnique {
@@ -210,4 +219,17 @@ export interface CollectorStatus {
     last_heartbeat_at: string;
     seconds_since_last_seen: number;
   }[];
+}
+
+export interface AcquireSelectionResult {
+  case_id: string;
+  selection: {
+    origin: 'client_selection' | 'server_adaptive';
+    run_id: string | null;
+    budget: number | null;
+    threat_context: string | null;
+    source_keys: string[];
+  };
+  acquired: { evidence_id: string; source_key: string; source_name: string; record_count: number; sha256_hash: string }[];
+  skipped: { source_key: string; source_name: string; reason: string }[];
 }

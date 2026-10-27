@@ -9,7 +9,7 @@ import { IncidentInvestigation } from './pages/IncidentInvestigation';
 import { EvidenceVault } from './pages/EvidenceVault';
 import { ResearchEvaluation } from './pages/ResearchEvaluation';
 import { api } from './services/api';
-import { deriveActiveThreat } from './utils/threatContext';
+import { deriveActiveThreat, resolvePrioritizationContext } from './utils/threatContext';
 import type {
   ReadinessAssessment,
   SecurityEvent,
@@ -33,6 +33,16 @@ export const App: React.FC = () => {
 
   const activeCase = cases.length > 0 ? cases[0] : null;
   const activeThreat = useMemo(() => deriveActiveThreat(alerts, activeCase), [alerts, activeCase]);
+
+  // Prioritization settings live here so the Prioritization page and the Vault use
+  // the same budget and threat context. The context follows the detected technique
+  // unless the analyst overrides it.
+  const [collectionBudget, setCollectionBudget] = useState<number>(60);
+  const [contextOverride, setContextOverride] = useState<string | null>(null);
+  const prioritizationContext = useMemo(
+    () => resolvePrioritizationContext(activeThreat, contextOverride),
+    [activeThreat, contextOverride]
+  );
 
   const loadData = useCallback(async () => {
     setIsRefreshing(true);
@@ -159,7 +169,15 @@ export const App: React.FC = () => {
         )}
 
         {currentTab === 'prioritization' && (
-          <EvidencePrioritization />
+          <EvidencePrioritization
+            context={prioritizationContext}
+            onOverrideContext={setContextOverride}
+            budget={collectionBudget}
+            onBudgetChange={setCollectionBudget}
+            activeCase={activeCase}
+            onRefresh={loadData}
+            onNavigateToVault={() => setCurrentTab('vault')}
+          />
         )}
 
         {currentTab === 'investigation' && (
@@ -174,7 +192,8 @@ export const App: React.FC = () => {
           <EvidenceVault
             vaultItems={vaultItems}
             activeCase={activeCase}
-            events={events}
+            prioritizationContext={prioritizationContext}
+            budget={collectionBudget}
             onRefresh={loadData}
           />
         )}

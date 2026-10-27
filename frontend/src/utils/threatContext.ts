@@ -2,17 +2,9 @@ import type {
   DetectionAlert,
   InvestigationCase,
   MitreTechnique,
-  ReadinessAssessment
+  ReadinessAssessment,
+  WeightProfile
 } from '../types';
-
-/**
- * ATT&CK techniques for which the backend readiness engine applies a
- * threat-specific weight profile (see calculate_readiness() in
- * backend/app/engines/readiness_engine.py). Any other technique passed as
- * threat_context is echoed back but scored with baseline weights.
- * Keep this in sync if new weight profiles are added server-side.
- */
-export const WEIGHT_PROFILED_TECHNIQUES: ReadonlySet<string> = new Set(['T1110']);
 
 const BASELINE_LABEL = 'Normal Baseline';
 const CLOSED_STATUSES = new Set(['CLOSED', 'RESOLVED', 'DISMISSED']);
@@ -87,16 +79,71 @@ export function findTechnique(
 }
 
 export type ReadinessWeighting =
-  | { kind: 'adjusted'; techniqueId: string }
+  | { kind: 'adjusted'; techniqueId: string; profile: WeightProfile }
   | { kind: 'context-only'; techniqueId: string }
   | { kind: 'baseline' };
 
-/** Describes how the readiness score returned by the API was weighted. */
+/**
+ * Describes how the readiness score returned by the API was weighted, using the
+ * backend's weight_profile (shared threat model in backend/app/core/threat_model.py).
+ */
 export function describeWeighting(readiness: ReadinessAssessment): ReadinessWeighting {
   const ctx = readiness.threat_context;
+  if (readiness.weight_profile) {
+    return { kind: 'adjusted', techniqueId: ctx, profile: readiness.weight_profile };
+  }
   if (!ctx || ctx === BASELINE_LABEL) return { kind: 'baseline' };
-  if (WEIGHT_PROFILED_TECHNIQUES.has(ctx)) return { kind: 'adjusted', techniqueId: ctx };
   return { kind: 'context-only', techniqueId: ctx };
+}
+
+/** Threat contexts the prioritization engine has an affinity profile for. */
+export const PRIORITIZATION_CONTEXTS: { id: string; label: string }[] = [
+  { id: 'T1110', label: 'T1110: SSH Brute Force / Password Guessing' },
+  { id: 'T1548.003', label: 'T1548.003: Privilege Escalation / Sudo Abuse' },
+  { id: 'T1059.004', label: 'T1059.004: Unix Shell & Scripting Execution' },
+  { id: 'BASELINE', label: 'BASELINE: Normal Security Operations' }
+];
+
+export interface PrioritizationContext {
+  /** Context actually used for prioritization and Vault acquisition. */
+  value: string;
+  /** True when it follows the detected technique rather than a manual choice. */
+  auto: boolean;
+  /** Explanation shown next to the selector. */
+  note: string;
+}
+
+/** Map a detected technique to a modeled prioritization context (exact, then parent). */
+function modeledContextFor(techniqueId: string): string | null {
+  const ids = PRIORITIZATION_CONTEXTS.map((c) => c.id);
+  if (ids.includes(techniqueId)) return techniqueId;
+  const parent = techniqueId.split('.')[0];
+  return ids.includes(parent) ? parent : null;
+}
+
+export function resolvePrioritizationContext(
+  activeThreat: ActiveThreat | null,
+  manualOverride: string | null
+): PrioritizationContext {
+  if (manualOverride) {
+    return { value: manualOverride, auto: false, note: 'Manually selected; not following live detections.' };
+  }
+  if (!activeThreat) {
+    return { value: 'BASELINE', auto: true, note: 'No active detection, so normal operations are assumed.' };
+  }
+  const modeled = modeledContextFor(activeThreat.techniqueId);
+  if (modeled) {
+    return {
+      value: modeled,
+      auto: true,
+      note: `Following the detected technique ${activeThreat.techniqueId}${activeThreat.origin === 'case' ? ' (from the open case)' : ''}.`
+    };
+  }
+  return {
+    value: 'BASELINE',
+    auto: true,
+    note: `Detected ${activeThreat.techniqueId} has no affinity profile yet, so BASELINE is used.`
+  };
 }
 
 /**

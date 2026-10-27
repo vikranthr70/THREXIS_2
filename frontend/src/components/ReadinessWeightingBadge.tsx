@@ -14,7 +14,7 @@ export const ReadinessWeightingBadge: React.FC<{ readiness: ReadinessAssessment 
     return (
       <span
         className="badge badge-amber"
-        title={`Source weights are re-weighted for the active ATT&CK technique ${weighting.techniqueId}. Without an active threat the score uses baseline weights.`}
+        title={`Weights ×${weighting.profile.multiplier} for sources critical to ${weighting.profile.technique} (ATT&CK affinity ≥ ${weighting.profile.affinity_threshold}): ${weighting.profile.boosted_sources.join(', ')}. Without an active threat the score uses baseline weights.`}
       >
         <Crosshair size={11} />
         THREAT-ADJUSTED · {weighting.techniqueId}
@@ -26,7 +26,7 @@ export const ReadinessWeightingBadge: React.FC<{ readiness: ReadinessAssessment 
     return (
       <span
         className="badge badge-neutral"
-        title={`Active technique ${weighting.techniqueId} has no weight profile in the readiness engine, so baseline weights apply.`}
+        title={`Active technique ${weighting.techniqueId} has no threat-model profile, so baseline weights apply.`}
       >
         BASELINE WEIGHTS · {weighting.techniqueId}
       </span>

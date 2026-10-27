@@ -7,7 +7,8 @@ import {
   StrategyComparisonItem,
   InvestigationCase,
   EvidenceVaultItem,
-  CollectorStatus
+  CollectorStatus,
+  AcquireSelectionResult
 } from '../types';
 
 const API_BASE = '/api/v1';
@@ -118,6 +119,27 @@ export const api = {
         source_title: sourceTitle,
         event_ids: eventIds,
         original_source_path: originalSourcePath
+      })
+    });
+  },
+
+  /**
+   * Preserve a prioritized selection for a case. Pass sourceKeys to preserve exactly
+   * what was selected on the Prioritization page; omit them to let the server run
+   * adaptive prioritization with the given budget/threat context.
+   */
+  acquireSelection: (
+    caseId: string,
+    opts: { sourceKeys?: string[]; budget?: number; threatContext?: string } = {}
+  ): Promise<AcquireSelectionResult> => {
+    return fetchJson(`${API_BASE}/vault/acquire-selection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        case_id: caseId,
+        source_keys: opts.sourceKeys,
+        budget: opts.budget,
+        threat_context: opts.threatContext
       })
     });
   },
