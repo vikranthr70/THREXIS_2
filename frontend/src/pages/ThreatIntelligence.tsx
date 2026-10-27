@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Crosshair, ExternalLink, ShieldAlert, FileSearch, Search } from 'lucide-react';
 import type { DetectionAlert, MitreTechnique } from '../types';
+import { isOpenStatus } from '../utils/threatContext';
+import { parseServerTime } from '../utils/time';
 
 interface ThreatIntelligenceProps {
   alerts: DetectionAlert[];
@@ -22,6 +24,7 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
   const selectedTechnique =
     techniques.find(t => t.id === selectedTechniqueId) ?? techniques[0] ?? null;
 
+  const openAlerts = alerts.filter(a => isOpenStatus(a.status));
   const q = searchQuery.toLowerCase();
   const filteredTechniques = techniques.filter(t =>
     t.name.toLowerCase().includes(q) ||
@@ -36,8 +39,8 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
       <div className="card">
         <div className="card-header">
           <span className="card-title">
-            <ShieldAlert size={16} className={alerts.length > 0 ? 'text-red' : 'text-teal'} />
-            Active Threat Detection Alerts ({alerts.length} Triggered)
+            <ShieldAlert size={16} className={openAlerts.length > 0 ? 'text-red' : 'text-teal'} />
+            Threat Detection Alerts ({openAlerts.length} open · {alerts.length - openAlerts.length} closed)
           </span>
           <span className="badge badge-neutral">Deterministic Correlation</span>
         </div>
@@ -55,13 +58,14 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
                   <th>Target User</th>
                   <th>Source IP</th>
                   <th>Event Count</th>
+                  <th>Status</th>
                   <th>Last Observed</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {alerts.map((alt) => (
-                  <tr key={alt.alert_id}>
+                  <tr key={alt.alert_id} className={isOpenStatus(alt.status) ? '' : 'row-dimmed'}>
                     <td className="mono cell-id">{alt.alert_id}</td>
                     <td className="text-primary">{alt.rule_name}</td>
                     <td>
@@ -74,7 +78,8 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
                     <td className="mono">{alt.target_user || 'N/A'}</td>
                     <td className="mono">{alt.source_ip || 'N/A'}</td>
                     <td className="mono cell-strong">{alt.event_count} events</td>
-                    <td className="mono cell-small">{new Date(alt.last_event_at).toLocaleTimeString()}</td>
+                    <td className="mono cell-small">{alt.status}</td>
+                    <td className="mono cell-small">{parseServerTime(alt.last_event_at).toLocaleTimeString()}</td>
                     <td>
                       <div className="row-sm">
                         <button className="btn btn-secondary btn-sm" onClick={() => setSelectedAlert(alt)}>
@@ -121,7 +126,7 @@ export const ThreatIntelligence: React.FC<ThreatIntelligenceProps> = ({
           <div className="select-list">
             {filteredTechniques.map((tech) => {
               const isSelected = selectedTechnique?.id === tech.id;
-              const hasAlert = alerts.some(a => a.technique_id.startsWith(tech.id));
+              const hasAlert = openAlerts.some(a => a.technique_id.startsWith(tech.id));
               return (
                 <button
                   key={tech.id}

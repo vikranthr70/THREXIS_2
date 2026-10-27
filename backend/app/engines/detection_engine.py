@@ -66,6 +66,7 @@ class DetectionEngine:
                     and_(
                         DetectionAlert.rule_id == "RULE-SSH-BRUTEFORCE",
                         DetectionAlert.source_host == new_event.host,
+                        DetectionAlert.status != "CLOSED",
                         DetectionAlert.last_event_at >= window_start
                     )
                 )
@@ -136,6 +137,7 @@ class DetectionEngine:
                 and_(
                     DetectionAlert.rule_id == "RULE-ROOT-AUTH-ATTEMPT",
                     DetectionAlert.source_host == new_event.host,
+                    DetectionAlert.status != "CLOSED",
                     DetectionAlert.last_event_at >= new_event.timestamp - datetime.timedelta(seconds=60)
                 )
             ))).scalars().first()

@@ -16,76 +16,224 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
+OPEN_CASE_STATUSES = ["ACTIVE", "UNDER_REVIEW"]
+VALID_CASE_STATUSES = {"ACTIVE", "UNDER_REVIEW", "PRESERVED", "CLOSED"}
+SEVERITY_RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+
+# Investigative prompts per ATT&CK technique (exact ID, then parent). These are open
+# questions for the analyst, not findings, so they are phrased as questions.
+TECHNIQUE_QUESTIONS = {
+    "T1110": [
+        "Did source IP {ips} target other hosts or accounts in the environment?",
+        "Are account lockout / fail2ban controls in place on {hosts}, and did they trigger?"
+    ],
+    "T1078": [
+        "Is direct root login over SSH permitted on {hosts} (sshd PermitRootLogin)?",
+        "Are any other privileged accounts exposed to password authentication?"
+    ],
+    "T1548": ["Which commands were run via sudo on {hosts}, and were they authorized?"],
+    "T1059": ["Which commands or scripts were executed, and from which session?"],
+}
+
+
+def _fmt(ts: Optional[datetime.datetime]) -> str:
+    return ts.strftime("%Y-%m-%d %H:%M:%S UTC") if ts else "unknown time"
+
+
+def _join(values) -> str:
+    vals = [v for v in values if v]
+    return ", ".join(sorted(set(vals))) if vals else "unknown"
+
+
 class InvestigationEngine:
+    async def _case_alerts(self, db: AsyncSession, case: InvestigationCase) -> List[DetectionAlert]:
+        if not case.supporting_alert_ids:
+            return []
+        res = await db.execute(select(DetectionAlert).where(DetectionAlert.alert_id.in_(case.supporting_alert_ids)))
+        return list(res.scalars().all())
+
+    async def _find_open_case_for_alert(self, db: AsyncSession, alert: DetectionAlert) -> Optional[InvestigationCase]:
+        """
+        One incident = one attacker against one host. An open case is reused when any of
+        its alerts shares the new alert's source host and source IP, regardless of
+        ATT&CK technique (a brute force and the root-login attempts it contains belong to
+        the same incident). Alerts without a source IP fall back to host + technique.
+        """
+        open_cases = (await db.execute(
+            select(InvestigationCase)
+            .where(InvestigationCase.status.in_(OPEN_CASE_STATUSES))
+            .order_by(InvestigationCase.updated_at.desc())
+        )).scalars().all()
+        for case in open_cases:
+            for a in await self._case_alerts(db, case):
+                same_host = a.source_host == alert.source_host
+                if alert.source_ip:
+                    if same_host and a.source_ip == alert.source_ip:
+                        return case
+                elif same_host and case.primary_technique == alert.technique_id:
+                    return case
+        return None
+
+    async def refresh_case(self, db: AsyncSession, case: InvestigationCase) -> InvestigationCase:
+        """
+        Regenerates title, severity, primary technique, summary, findings and open questions
+        from the case's current alerts and telemetry. Nothing here is a fixed template claim:
+        every finding is computed from stored data, including whether the attack succeeded.
+        Analyst notes, status and readiness-at-detection are never touched.
+        """
+        alerts = await self._case_alerts(db, case)
+        if not alerts:
+            return case
+
+        ranked = sorted(
+            alerts,
+            key=lambda a: (a.event_count or 0, SEVERITY_RANK.get(a.severity, 0), a.last_event_at),
+            reverse=True
+        )
+        lead = ranked[0]
+        hosts = {a.source_host for a in alerts if a.source_host}
+        ips = {a.source_ip for a in alerts if a.source_ip}
+        users = {a.target_user for a in alerts if a.target_user}
+        first_seen = min(a.first_event_at for a in alerts)
+        last_seen = max(a.last_event_at for a in alerts)
+        techniques = []
+        for a in ranked:
+            label = f"{a.technique_id} ({a.technique_name})"
+            if label not in techniques:
+                techniques.append(label)
+
+        # ---- Compromise check: did any login from the attacking IP succeed? ----
+        successes: List[SecurityEvent] = []
+        if ips:
+            successes = list((await db.execute(
+                select(SecurityEvent).where(and_(
+                    SecurityEvent.event_type == "ssh_auth_success",
+                    SecurityEvent.source_ip.in_(list(ips)),
+                    SecurityEvent.host.in_(list(hosts)),
+                    SecurityEvent.timestamp >= first_seen
+                )).order_by(SecurityEvent.timestamp.asc())
+            )).scalars().all())
+
+        event_ids = list(dict.fromkeys(
+            [eid for a in alerts for eid in (a.supporting_event_ids or [])] + [e.event_id for e in successes]
+        ))
+
+        severity = max((a.severity for a in alerts), key=lambda s: SEVERITY_RANK.get(s, 0))
+        if successes:
+            severity = "CRITICAL"
+
+        title = f"{lead.technique_name} from {_join(ips)} on {_join(hosts)}"
+        if successes:
+            title = f"Possible compromise: {title}"
+
+        summary = (
+            f"{len(alerts)} detection alert{'s' if len(alerts) != 1 else ''} mapped to {', '.join(techniques)}, "
+            f"with {len(event_ids)} supporting events from {_join(ips)} against account(s) {_join(users)} "
+            f"on {_join(hosts)}, observed {_fmt(first_seen)} to {_fmt(last_seen)}."
+        )
+        if successes:
+            s0 = successes[0]
+            summary += (
+                f" A successful SSH login for '{s0.user}' from {s0.source_ip} was recorded at "
+                f"{_fmt(s0.timestamp)}; the account should be treated as compromised."
+            )
+        else:
+            summary += " No successful SSH login from the source IP has been recorded in collected telemetry."
+
+        findings = [
+            f"{a.rule_name}: {a.event_count} event{'s' if a.event_count != 1 else ''} against "
+            f"'{a.target_user or 'unknown'}' from {a.source_ip or 'unknown IP'} on {a.source_host}, "
+            f"mapped to {a.technique_id} ({a.technique_name}, {a.tactic})."
+            for a in ranked
+        ]
+        if successes:
+            for e in successes:
+                findings.append(
+                    f"SUCCESSFUL SSH login for '{e.user}' from {e.source_ip} at {_fmt(e.timestamp)} "
+                    f"after failed attempts from the same IP."
+                )
+        else:
+            findings.append(
+                f"No successful SSH login from {_join(ips)} was recorded in collected telemetry after "
+                f"{_fmt(first_seen)}. This covers events streamed by the THREXIS collector only."
+            )
+        findings.append(f"SHA-256 integrity hashes were recorded at ingestion for all {len(event_ids)} supporting events.")
+
+        fmt_args = {"ips": _join(ips), "hosts": _join(hosts)}
+        questions: List[str] = []
+        if successes:
+            questions.append(
+                "What did the attacker do after logging in? Review session, process and file activity on the host."
+            )
+        for a in ranked:
+            for key in (a.technique_id, a.technique_id.split(".")[0]):
+                for q in TECHNIQUE_QUESTIONS.get(key, []):
+                    q = q.format(**fmt_args)
+                    if q not in questions:
+                        questions.append(q)
+
+        case.title = title
+        case.severity = severity
+        case.primary_technique = lead.technique_id
+        case.summary = summary
+        case.findings = findings
+        case.unresolved_questions = questions
+        case.supporting_alert_ids = [a.alert_id for a in alerts]
+        case.supporting_event_ids = event_ids
+        case.updated_at = datetime.datetime.utcnow()
+        await db.commit()
+        await db.refresh(case)
+        return case
+
     async def create_or_update_case_for_alert(
         self,
         db: AsyncSession,
         alert: DetectionAlert
     ) -> InvestigationCase:
         """
-        Creates an investigation case for an active alert or updates an existing open case.
+        Attaches an alert to the open case for the same attacker + host, or opens a new case.
+        Case content is regenerated from real data on every update.
         """
-        # Check for open case with same host and technique
-        query = select(InvestigationCase).where(
-            and_(
-                InvestigationCase.status.in_(["ACTIVE", "UNDER_REVIEW"]),
-                InvestigationCase.primary_technique == alert.technique_id
+        case = await self._find_open_case_for_alert(db, alert)
+
+        if case is None:
+            readiness_data = await readiness_engine.calculate_readiness(db, threat_context=alert.technique_id)
+            case = InvestigationCase(
+                case_id=f"CASE-{datetime.datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}",
+                title=f"{alert.technique_name} on {alert.source_host}",
+                status="ACTIVE",
+                severity=alert.severity,
+                primary_technique=alert.technique_id,
+                summary="",
+                scope_and_methodology=(
+                    "Scope encompasses Linux authentication telemetry streamed by the THREXIS collector "
+                    "(SSH authentication and sudo events). Investigation follows threat-informed digital forensic "
+                    "readiness principles, prioritizing evidence acquisition under constrained budgets with "
+                    "SHA-256 chain-of-custody preservation."
+                ),
+                analyst_notes="",
+                findings=[],
+                unresolved_questions=[],
+                # Recorded once, when the case is opened, and never overwritten afterwards.
+                readiness_score_at_time=readiness_data["score"],
+                supporting_event_ids=alert.supporting_event_ids or [],
+                supporting_alert_ids=[alert.alert_id]
             )
-        )
-        existing_case = (await db.execute(query)).scalars().first()
-        readiness_data = await readiness_engine.calculate_readiness(db, threat_context=alert.technique_id)
-
-        if existing_case:
-            alert_ids = list(set((existing_case.supporting_alert_ids or []) + [alert.alert_id]))
-            event_ids = list(set((existing_case.supporting_event_ids or []) + (alert.supporting_event_ids or [])))
-            existing_case.supporting_alert_ids = alert_ids
-            existing_case.supporting_event_ids = event_ids
-            existing_case.updated_at = datetime.datetime.utcnow()
-            existing_case.readiness_score_at_time = readiness_data["score"]
+            db.add(case)
             await db.commit()
-            await db.refresh(existing_case)
-            return existing_case
+            await db.refresh(case)
+        elif alert.alert_id not in (case.supporting_alert_ids or []):
+            case.supporting_alert_ids = list(case.supporting_alert_ids or []) + [alert.alert_id]
 
-        case_id = f"CASE-{datetime.datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-        new_case = InvestigationCase(
-            case_id=case_id,
-            title=f"Incident Investigation: {alert.rule_name} on {alert.source_host}",
-            status="ACTIVE",
-            severity=alert.severity,
-            primary_technique=alert.technique_id,
-            summary=(
-                f"Suspicious activity detected matching MITRE ATT&CK {alert.technique_id} ({alert.technique_name}). "
-                f"Telemetric burst of {alert.event_count} security events observed from source IP {alert.source_ip or 'unknown'} "
-                f"against account '{alert.target_user or 'unknown'}' on host '{alert.source_host}'."
-            ),
-            scope_and_methodology=(
-                "Scope encompasses Linux system authentication telemetry, system journal logs, and network connection records. "
-                "Investigation follows threat-informed digital forensic readiness principles, prioritizing evidence acquisition "
-                "under constrained forensic budgets with cryptographic SHA-256 chain-of-custody preservation."
-            ),
-            analyst_notes=(
-                "Initial Assessment: Rapid succession of authentication failures detected. "
-                "No successful authentication recorded following the burst. "
-                "Recommended Action: Preserve auth.log and btmp logs, verify iptables/fail2ban state."
-            ),
-            findings=[
-                f"Detected {alert.event_count} failed SSH logins within configured detection window.",
-                f"Mapped to MITRE ATT&CK {alert.technique_id} ({alert.technique_name}) under tactic '{alert.tactic}'.",
-                "Cryptographic event integrity hashes recorded for all supporting telemetry items.",
-                "Target user account was not observed to be successfully breached in available logs."
-            ],
-            unresolved_questions=[
-                "Did the adversary attempt lateral movement from another host within the subnet?",
-                "Are automated brute-force tools (e.g. Hydra, Medusa) indicated by user-agent or client software strings?"
-            ],
-            readiness_score_at_time=readiness_data["score"],
-            supporting_event_ids=alert.supporting_event_ids or [],
-            supporting_alert_ids=[alert.alert_id]
-        )
-        db.add(new_case)
-        await db.commit()
-        await db.refresh(new_case)
-        return new_case
+        return await self.refresh_case(db, case)
+
+    async def refresh_open_cases(self, db: AsyncSession) -> None:
+        """Re-evaluates open cases, e.g. after a successful login arrives with no new alert."""
+        open_cases = (await db.execute(
+            select(InvestigationCase).where(InvestigationCase.status.in_(OPEN_CASE_STATUSES))
+        )).scalars().all()
+        for case in open_cases:
+            await self.refresh_case(db, case)
 
     async def get_case_details(self, db: AsyncSession, case_id: str) -> Optional[Dict[str, Any]]:
         result = await db.execute(select(InvestigationCase).where(InvestigationCase.case_id == case_id))
@@ -153,13 +301,32 @@ class InvestigationEngine:
             "timeline": timeline
         }
 
-    async def update_notes(self, db: AsyncSession, case_id: str, notes: str, status: Optional[str] = None) -> Optional[InvestigationCase]:
+    async def update_notes(
+        self,
+        db: AsyncSession,
+        case_id: str,
+        notes: Optional[str] = None,
+        status: Optional[str] = None
+    ) -> Optional[InvestigationCase]:
+        """
+        Updates analyst notes and/or status. Fields left as None are not touched, so a
+        status change never wipes the notes. Closing a case closes its alerts (so the
+        dashboard leaves threat-adjusted mode); reopening reactivates them.
+        """
         result = await db.execute(select(InvestigationCase).where(InvestigationCase.case_id == case_id))
         case = result.scalars().first()
         if not case:
             return None
-        case.analyst_notes = notes
+        if notes is not None:
+            case.analyst_notes = notes
         if status:
+            status = status.upper()
+            if status not in VALID_CASE_STATUSES:
+                raise ValueError(f"Invalid case status '{status}'")
+            if status != case.status:
+                alert_status = "CLOSED" if status == "CLOSED" else "ACTIVE"
+                for a in await self._case_alerts(db, case):
+                    a.status = alert_status
             case.status = status
         case.updated_at = datetime.datetime.utcnow()
         await db.commit()
@@ -218,8 +385,12 @@ class InvestigationEngine:
             ],
             "timeline": data["timeline"],
             "limitations": [
-                "Analysis limited to monitored telemetry sources; process exec and auditd logs were missing during assessment.",
-                "Adversary intent inferred from observed network and authentication telemetry without memory forensics."
+                *(
+                    [f"Evidence sources missing or unavailable at report time: {', '.join(g['source_name'] for g in readiness_data['gaps'] if g['current_factor'] == 0)}."]
+                    if any(g["current_factor"] == 0 for g in readiness_data["gaps"]) else []
+                ),
+                "Telemetry covers only events streamed by the THREXIS collector (SSH authentication and sudo).",
+                "Adversary intent inferred from authentication telemetry without memory or disk forensics."
             ]
         }
         return report

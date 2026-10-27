@@ -11,6 +11,7 @@ import {
   Clock
 } from 'lucide-react';
 import type { CollectorStatus, InvestigationCase } from '../types';
+import { parseServerTime } from '../utils/time';
 
 interface SidebarProps {
   currentTab: string;
@@ -138,7 +139,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10.5px', color: 'var(--text-muted)' }}>
           <Clock size={11} />
-          <span>Last sync: {lastEventTime ? new Date(lastEventTime).toLocaleTimeString() : 'Awaiting stream'}</span>
+          <span>Last sync: {lastEventTime ? parseServerTime(lastEventTime).toLocaleTimeString() : 'Awaiting stream'}</span>
         </div>
       </div>
     </aside>

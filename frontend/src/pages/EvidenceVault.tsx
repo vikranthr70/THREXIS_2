@@ -4,6 +4,7 @@ import type { EvidenceVaultItem, InvestigationCase, AcquireSelectionResult } fro
 import { api } from '../services/api';
 import { AcquisitionSummary } from '../components/AcquisitionSummary';
 import type { PrioritizationContext } from '../utils/threatContext';
+import { parseServerTime } from '../utils/time';
 
 interface EvidenceVaultProps {
   vaultItems: EvidenceVaultItem[];
@@ -78,7 +79,7 @@ export const EvidenceVault: React.FC<EvidenceVaultProps> = ({
             <h2 className="hero-title">Cryptographic Evidence Vault & Chain of Custody</h2>
             <div className="hero-desc">
               All acquired digital evidence artifacts are saved as bit-stream copies with immediate SHA-256 hash generation,
-              stored in read-only vaults with signed JSON custody manifests to guarantee evidentiary admissibility.
+              stored in read-only vaults with JSON custody manifests to support evidentiary integrity.
             </div>
           </div>
 
@@ -163,7 +164,7 @@ export const EvidenceVault: React.FC<EvidenceVaultProps> = ({
                           {item.integrity_status}
                         </span>
                       </td>
-                      <td className="mono cell-small">{new Date(item.last_verified_at).toLocaleTimeString()}</td>
+                      <td className="mono cell-small">{parseServerTime(item.last_verified_at).toLocaleTimeString()}</td>
                       <td>
                         <button
                           className="btn btn-secondary btn-sm"

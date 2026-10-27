@@ -93,6 +93,14 @@ export const api = {
     });
   },
 
+  updateCaseStatus: (caseId: string, status: string): Promise<InvestigationCase> => {
+    return fetchJson(`${API_BASE}/investigation/case/${caseId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+  },
+
   getReportDownloadUrl: (caseId: string, format: 'pdf' | 'json'): string => {
     return `${API_BASE}/investigation/case/${caseId}/report.${format}`;
   },

@@ -75,6 +75,11 @@ async def ingest_telemetry(
             # Create or update investigation case
             await investigation_engine.create_or_update_case_for_alert(db, alt)
 
+    # Successful logins don't raise alerts, but they can change a case's outcome
+    # (brute force -> possible compromise), so re-evaluate open cases.
+    if any(e.event_type == "ssh_auth_success" for e in ingested_events):
+        await investigation_engine.refresh_open_cases(db)
+
     # If new events ingested, broadcast to WebSocket clients
     if ingested_events:
         await manager.broadcast({

@@ -38,12 +38,15 @@ async def update_case_notes_and_status(
     payload: UpdateInvestigationCaseInput,
     db: AsyncSession = Depends(get_db)
 ):
-    updated = await investigation_engine.update_notes(
-        db=db,
-        case_id=case_id,
-        notes=payload.analyst_notes or "",
-        status=payload.status
-    )
+    try:
+        updated = await investigation_engine.update_notes(
+            db=db,
+            case_id=case_id,
+            notes=payload.analyst_notes,
+            status=payload.status
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not updated:
         raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
     return updated

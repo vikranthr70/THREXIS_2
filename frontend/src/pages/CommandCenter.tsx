@@ -22,8 +22,10 @@ import {
   type ActiveThreat,
   deriveNextAction,
   findTechnique,
+  isOpenStatus,
   severityRank
 } from '../utils/threatContext';
+import { parseServerTime } from '../utils/time';
 
 interface CommandCenterProps {
   readiness: ReadinessAssessment | null;
@@ -56,9 +58,10 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
 
   const collector = collectorStatus?.collectors[0];
   const isVmOnline = !!collectorStatus && collectorStatus.connected_collectors_count > 0;
-  const highSeverityAlerts = alerts.filter(a => a.severity === 'HIGH' || a.severity === 'CRITICAL');
+  const openAlerts = alerts.filter(a => isOpenStatus(a.status));
+  const highSeverityAlerts = openAlerts.filter(a => a.severity === 'HIGH' || a.severity === 'CRITICAL');
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
-  const eventsInLast5Min = events.filter(e => new Date(e.timestamp) >= fiveMinAgo).length;
+  const eventsInLast5Min = events.filter(e => parseServerTime(e.timestamp) >= fiveMinAgo).length;
 
   const nextAction = activeCase ? deriveNextAction(activeCase) : null;
   // Same definition as the backend's coverage_percentage (available/collected/validated),
@@ -164,7 +167,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
 
             <div className="stat">
               <div className="label">Active Detections</div>
-              <div className={`stat-value-lg ${alerts.length > 0 ? 'text-red' : ''}`}>{alerts.length}</div>
+              <div className={`stat-value-lg ${openAlerts.length > 0 ? 'text-red' : ''}`}>{openAlerts.length}</div>
               <div className={`text-xs ${highSeverityAlerts.length > 0 ? 'text-red' : 'text-muted'}`}>
                 {highSeverityAlerts.length} high/critical severity
               </div>
@@ -194,7 +197,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              <AlertTriangle size={16} className={alerts.length > 0 ? 'text-red' : 'text-teal'} />
+              <AlertTriangle size={16} className={openAlerts.length > 0 ? 'text-red' : 'text-teal'} />
               Active Incident Response Case
             </span>
             {activeCase ? (
@@ -312,7 +315,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
               {lastObserved && (
                 <div className="kv-row">
                   <span>Last Observed:</span>
-                  <span className="mono">{new Date(lastObserved).toLocaleString()}</span>
+                  <span className="mono">{parseServerTime(lastObserved).toLocaleString()}</span>
                 </div>
               )}
 
@@ -396,7 +399,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                   return (
                     <tr key={evt.event_id}>
                       <td className="mono cell-small">
-                        {new Date(evt.timestamp).toISOString().replace('T', ' ').slice(0, 19)}
+                        {parseServerTime(evt.timestamp).toISOString().replace('T', ' ').slice(0, 19)}
                       </td>
                       <td className="mono text-primary">{evt.host}</td>
                       <td><span className="badge badge-neutral">{evt.source}</span></td>

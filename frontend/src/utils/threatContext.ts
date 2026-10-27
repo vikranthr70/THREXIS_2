@@ -5,6 +5,7 @@ import type {
   ReadinessAssessment,
   WeightProfile
 } from '../types';
+import { parseServerTime } from './time';
 
 const BASELINE_LABEL = 'Normal Baseline';
 const CLOSED_STATUSES = new Set(['CLOSED', 'RESOLVED', 'DISMISSED']);
@@ -28,7 +29,7 @@ export const rankAlerts = (alerts: DetectionAlert[]): DetectionAlert[] =>
     (a, b) =>
       (b.event_count || 0) - (a.event_count || 0) ||
       severityRank(b.severity) - severityRank(a.severity) ||
-      new Date(b.last_event_at).getTime() - new Date(a.last_event_at).getTime()
+      parseServerTime(b.last_event_at).getTime() - parseServerTime(a.last_event_at).getTime()
   );
 
 export interface ActiveThreat {

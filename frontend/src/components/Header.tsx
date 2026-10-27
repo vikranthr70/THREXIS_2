@@ -26,7 +26,7 @@ const TAB_TITLES: Record<string, { title: string; subtitle: string }> = {
   },
   'investigation': {
     title: 'Incident Investigation Workspace',
-    subtitle: 'Correlated event chronology, analyst hypothesis tracking, and court-admissible forensic reporting'
+    subtitle: 'Correlated event chronology, computed findings, case lifecycle and forensic reporting'
   },
   'vault': {
     title: 'Forensic Evidence Vault',

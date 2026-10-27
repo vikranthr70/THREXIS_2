@@ -593,6 +593,12 @@ textarea.form-control { background-color: var(--bg-core); padding: var(--space-3
 .timeline-dot.is-alert { background-color: var(--red-oxide-bright); }
 .timeline-dot.is-vault { background-color: var(--teal-glow); }
 
+/* Grouped (expandable) runs of repeated timeline events */
+.timeline-group > summary { cursor: pointer; list-style: none; }
+.timeline-group > summary::-webkit-details-marker { display: none; }
+.timeline-chevron { transition: transform 0.15s ease; }
+.timeline-group[open] .timeline-chevron { transform: rotate(90deg); }
+
 /* ---- Step strip (vault workflow) ---- */
 .step-strip {
   margin-top: var(--space-4);

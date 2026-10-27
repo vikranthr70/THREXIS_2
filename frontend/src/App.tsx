@@ -8,7 +8,7 @@ import { EvidencePrioritization } from './pages/EvidencePrioritization';
 import { IncidentInvestigation } from './pages/IncidentInvestigation';
 import { EvidenceVault } from './pages/EvidenceVault';
 import { api } from './services/api';
-import { deriveActiveThreat, resolvePrioritizationContext } from './utils/threatContext';
+import { deriveActiveThreat, isOpenStatus, resolvePrioritizationContext } from './utils/threatContext';
 import type {
   ReadinessAssessment,
   SecurityEvent,
@@ -30,7 +30,9 @@ export const App: React.FC = () => {
   const [cases, setCases] = useState<InvestigationCase[]>([]);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  const activeCase = cases.length > 0 ? cases[0] : null;
+  // The active case is the most recently updated case that is still open; a closed
+  // case must not keep driving the dashboard's threat context.
+  const activeCase = useMemo(() => cases.find((c) => isOpenStatus(c.status)) ?? null, [cases]);
   const activeThreat = useMemo(() => deriveActiveThreat(alerts, activeCase), [alerts, activeCase]);
 
   // Prioritization settings live here so the Prioritization page and the Vault use
@@ -58,7 +60,7 @@ export const App: React.FC = () => {
       // Readiness is scored against the technique of the current alert/case so the
       // backend can apply its threat-specific weight profile (e.g. T1110). It is
       // fetched after alerts/cases so the context always matches this refresh.
-      const threat = deriveActiveThreat(aData, caseList.length > 0 ? caseList[0] : null);
+      const threat = deriveActiveThreat(aData, caseList.find((c) => isOpenStatus(c.status)) ?? null);
       const rData = await api.getReadiness(threat?.techniqueId).catch(() => null);
 
       if (rData) setReadiness(rData);
@@ -181,7 +183,9 @@ export const App: React.FC = () => {
 
         {currentTab === 'investigation' && (
           <IncidentInvestigation
+            cases={cases}
             activeCase={activeCase}
+            vaultItems={vaultItems}
             onRefresh={loadData}
             onNavigateToVault={() => setCurrentTab('vault')}
           />
