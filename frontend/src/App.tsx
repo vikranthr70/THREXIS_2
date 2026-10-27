@@ -7,7 +7,6 @@ import { ThreatIntelligence } from './pages/ThreatIntelligence';
 import { EvidencePrioritization } from './pages/EvidencePrioritization';
 import { IncidentInvestigation } from './pages/IncidentInvestigation';
 import { EvidenceVault } from './pages/EvidenceVault';
-import { ResearchEvaluation } from './pages/ResearchEvaluation';
 import { api } from './services/api';
 import { deriveActiveThreat, resolvePrioritizationContext } from './utils/threatContext';
 import type {
@@ -196,10 +195,6 @@ export const App: React.FC = () => {
             budget={collectionBudget}
             onRefresh={loadData}
           />
-        )}
-
-        {currentTab === 'evaluation' && (
-          <ResearchEvaluation />
         )}
       </div>
     </div>

@@ -31,10 +31,6 @@ const TAB_TITLES: Record<string, { title: string; subtitle: string }> = {
   'vault': {
     title: 'Forensic Evidence Vault',
     subtitle: 'Tamper-evident preservation with SHA-256 cryptographic chain-of-custody verification'
-  },
-  'evaluation': {
-    title: 'Offline Research Evaluation',
-    subtitle: 'Academically defensible multi-workload benchmark comparing 5 evidence selection strategies'
   }
 };
 

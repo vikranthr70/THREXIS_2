@@ -8,7 +8,6 @@ from backend.app.engines.detection_engine import detection_engine
 from backend.app.engines.prioritization_engine import prioritization_engine
 from backend.app.engines.vault_engine import vault_engine
 from backend.app.engines.investigation_engine import investigation_engine
-from backend.app.engines.evaluation_engine import evaluation_engine
 
 @pytest.mark.asyncio
 async def test_forensic_readiness_calculation(test_db):
@@ -218,12 +217,6 @@ async def test_investigation_and_pdf_generation(test_db):
     pdf_bytes = await investigation_engine.generate_pdf_report(test_db, case.case_id)
     assert pdf_bytes.startswith(b"%PDF")
     assert len(pdf_bytes) > 1000
-
-def test_offline_research_evaluation():
-    exp = evaluation_engine.run_budget_experiments(budget_levels=[20.0, 40.0])
-    assert len(exp["eval_matrix"]) == 10  # 2 budgets * 5 strategies
-    shift = evaluation_engine.run_context_shift_experiment()
-    assert len(shift["shift_data"]) == 10  # 2 phases * 5 strategies
 
 def test_shared_threat_model_preserves_t1110_boost_and_covers_other_techniques():
     from backend.app.core.threat_model import boosted_sources, weight_profile, get_affinity, resolve_technique

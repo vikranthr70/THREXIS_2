@@ -67,7 +67,7 @@ Evidence Preservation (SHA-256) → Incident Investigation → Forensic Report (
 
 ## 3. Workstation Navigation & Pages
 
-THREXIS provides six primary sidebar sections and a dedicated academic research evaluation module:
+THREXIS provides six primary sidebar sections:
 
 1. **Command Center**:
    - Prominent segmented readiness instrument gauge.
@@ -108,10 +108,6 @@ THREXIS provides six primary sidebar sections and a dedicated academic research 
    - Bit-stream evidence preservation with immediate SHA-256 cryptographic hashing.
    - Immutable custody chain manifests (`.manifest.json`).
    - Interactive **Verify Integrity** button performing bit-level re-hashing against stored records.
-
-7. **Offline Research Evaluation**:
-   - 80 reproducible benchmark trials across 4 budget tiers (20, 40, 60, 80 units).
-   - Threat context-shift pivot experiment (`T1110` SSH Brute Force $\to$ `T1548` Sudo Abuse) demonstrating adaptive resilience.
 
 ---
 

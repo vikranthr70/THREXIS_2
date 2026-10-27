@@ -148,14 +148,5 @@ export const api = {
     return fetchJson(`${API_BASE}/vault/verify/${evidenceId}`, {
       method: 'POST'
     });
-  },
-
-  // Offline Research Evaluation
-  getEvaluationExperiments: (budgets = '20,40,60,80'): Promise<any> => {
-    return fetchJson(`${API_BASE}/evaluation/experiments?budgets=${budgets}`);
-  },
-
-  getContextShiftExperiment: (): Promise<any> => {
-    return fetchJson(`${API_BASE}/evaluation/context-shift`);
   }
 };

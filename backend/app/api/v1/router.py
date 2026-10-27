@@ -6,8 +6,7 @@ from backend.app.api.v1.endpoints import (
     intelligence,
     prioritization,
     investigation,
-    vault,
-    evaluation
+    vault
 )
 
 api_router = APIRouter()
@@ -19,4 +18,3 @@ api_router.include_router(intelligence.router, tags=["intelligence"])
 api_router.include_router(prioritization.router, tags=["prioritization"])
 api_router.include_router(investigation.router, tags=["investigation"])
 api_router.include_router(vault.router, tags=["vault"])
-api_router.include_router(evaluation.router, tags=["evaluation"])

@@ -6,7 +6,6 @@ import {
   ListOrdered,
   FileSearch,
   Vault,
-  BarChart3,
   Server,
   Activity,
   Clock
@@ -40,7 +39,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'prioritization', label: 'Evidence Prioritization', icon: ListOrdered, badge: null },
     { id: 'investigation', label: 'Incident Investigation', icon: FileSearch, badge: activeCase ? 'Active' : null },
     { id: 'vault', label: 'Evidence Vault', icon: Vault, badge: null },
-    { id: 'evaluation', label: 'Research Evaluation', icon: BarChart3, badge: null },
   ];
 
   return (

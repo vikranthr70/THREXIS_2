@@ -86,7 +86,7 @@ async def test_api_telemetry_ingest_and_alert_flow():
         assert pdf_res.content.startswith(b"%PDF")
 
 @pytest.mark.asyncio
-async def test_api_prioritization_and_evaluation():
+async def test_api_prioritization():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         prio_payload = {
             "strategy": "adaptive",
@@ -104,12 +104,6 @@ async def test_api_prioritization_and_evaluation():
         assert comp_res.status_code == 200
         comp_data = comp_res.json()
         assert len(comp_data["strategies_comparison"]) == 5
-
-        # Test offline evaluation experiments endpoint
-        eval_res = await ac.get("/api/v1/evaluation/experiments?budgets=20,40")
-        assert eval_res.status_code == 200
-        edata = eval_res.json()
-        assert len(edata["eval_matrix"]) == 10
 
 @pytest.mark.asyncio
 async def test_api_vault_acquire_prioritized_selection():
